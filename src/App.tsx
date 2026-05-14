@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { TeacherDashboard } from './pages/TeacherDashboard';
 import { AdminDashboard } from './pages/AdminDashboard';
@@ -34,8 +34,11 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-neutral-50">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+      <div className="flex items-center justify-center min-h-screen bg-slate-50">
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-2xl h-12 w-12 border-4 border-indigo-600 border-t-transparent shadow-xl shadow-indigo-100"></div>
+          <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Initializing DutyGuard...</p>
+        </div>
       </div>
     );
   }
@@ -48,10 +51,10 @@ export default function App() {
         <Route element={<Layout session={session} />}>
           <Route path="/" element={session ? <RoleBasedRedirect session={session} /> : <Navigate to="/login" />} />
           <Route path="/teacher" element={<TeacherDashboard />} />
+          <Route path="/manager" element={<ManagerDashboard />} />
           <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/admin/teachers" element={<AdminTeachers />} />
           <Route path="/admin/venues" element={<AdminVenues />} />
-          <Route path="/manager" element={<ManagerDashboard />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" />} />
@@ -62,12 +65,14 @@ export default function App() {
 }
 
 function RoleBasedRedirect({ session }: { session: any }) {
-  // In a real app, this should fetch from the DB profile.
-  // For this prototype, we'll use a mocked logic based on user email if needed,
-  // or default to teacher as it's the primary mobile experience requested.
+  // Simple role simulation based on email or persistence
+  const forcedRole = localStorage.getItem('dutyguard_forced_role');
+  if (forcedRole) return <Navigate to={`/${forcedRole}`} />;
+
   const email = session.user?.email;
   if (email?.includes('admin')) return <Navigate to="/admin" />;
   if (email?.includes('manager')) return <Navigate to="/manager" />;
+  
   return <Navigate to="/teacher" />;
 }
 

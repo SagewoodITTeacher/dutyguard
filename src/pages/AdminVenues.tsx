@@ -19,8 +19,22 @@ export function AdminVenues() {
   }, []);
 
   async function fetchVenues() {
+    const isDemo = !!localStorage.getItem('dutyguard_demo_session');
+
     try {
       setLoading(true);
+      
+      if (isDemo) {
+        await new Promise(resolve => setTimeout(resolve, 800)); // Simulate delay
+        setVenues([
+          { id: 'v1', name: 'Great Hall', type: 'Hall', capacity: 350 },
+          { id: 'v2', name: 'IT Lab 1', type: 'Lab', capacity: 40 },
+          { id: 'v3', name: 'Science Lab 4', type: 'Lab', capacity: 35 },
+          { id: 'v4', name: 'Sports Pavilion', type: 'Hall', capacity: 150 }
+        ]);
+        return;
+      }
+
       const { data, error } = await supabase
         .from('venues')
         .select('*')

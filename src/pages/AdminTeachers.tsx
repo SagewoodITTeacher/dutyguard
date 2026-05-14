@@ -19,8 +19,22 @@ export function AdminTeachers() {
   }, []);
 
   async function fetchStaff() {
+    const isDemo = !!localStorage.getItem('dutyguard_demo_session');
+
     try {
       setLoading(true);
+      
+      if (isDemo) {
+        await new Promise(resolve => setTimeout(resolve, 800)); // Simulate delay
+        setStaff([
+          { id: '1', full_name: 'Franz Nortjé', staff_code: 'FRAN', email: 'nortje.f@school.edu', department: 'Management' },
+          { id: '2', full_name: 'Johann de Wet', staff_code: 'JOHD', email: 'johand.d@school.edu', department: 'Operations' },
+          { id: '3', full_name: 'Ayam Staff', staff_code: 'AYAM', email: 'ayam@school.edu', department: 'Science' },
+          { id: '4', full_name: 'Amop Teacher', staff_code: 'AMOP', email: 'amop@school.edu', department: 'IT' }
+        ]);
+        return;
+      }
+
       const { data, error } = await supabase
         .from('staff')
         .select('*')

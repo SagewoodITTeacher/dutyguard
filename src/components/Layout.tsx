@@ -1,6 +1,9 @@
 import { Outlet, useNavigate, Link, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { LogOut, Bell, Shield, User, Menu, X, LayoutDashboard, Calendar, Users, MapPin, Search, Settings, ChevronRight, Check } from 'lucide-react';
+import { 
+  LogOut, Bell, Shield, User, Menu, X, LayoutDashboard, Calendar, Users, 
+  MapPin, Search, Settings, ChevronRight, Check, Loader2 
+} from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -23,6 +26,7 @@ export function Layout({ session, roleInfo }: { session: any; roleInfo: UserRole
   }, [roleInfo]);
 
   const handleLogout = async () => {
+    localStorage.removeItem('dutyguard_demo_session');
     await supabase.auth.signOut();
     navigate('/login');
   };
@@ -194,33 +198,42 @@ export function Layout({ session, roleInfo }: { session: any; roleInfo: UserRole
                 </div>
               </div>
 
-              <div className="flex-1 flex flex-col p-12">
-                <div className="flex justify-between items-start mb-12">
+              <div className="flex-1 flex flex-col p-12 overflow-hidden bg-white">
+                <div className="flex justify-between items-start mb-8 shrink-0">
                   <div>
                     <h4 className="text-3xl font-black italic uppercase tracking-tight">Access Control</h4>
                     <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 mt-2">Matrix Modification Protocol</p>
                   </div>
-                  <button onClick={() => setShowAccessControl(false)} className="h-12 w-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 hover:bg-red-50 hover:text-red-500 transition-all"><X className="h-6 w-6" /></button>
+                  <button onClick={() => setShowAccessControl(false)} className="h-12 w-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 hover:bg-red-50 hover:text-red-500 transition-all shadow-sm"><X className="h-6 w-6" /></button>
                 </div>
 
-                {selectedStaff ? (
-                  <div className="space-y-12">
-                    <div className="flex items-center gap-8">
-                       <div className="h-24 w-24 bg-indigo-50 rounded-[2.5rem] flex items-center justify-center text-indigo-600 text-3xl font-black italic shadow-inner">
+                <div className="flex-1 overflow-y-auto pr-4 -mr-4 custom-scrollbar pb-10">
+                  {selectedStaff ? (
+                    <div className="space-y-10">
+                      <div className="flex items-center gap-8 bg-slate-50/50 p-6 rounded-[2.5rem] border border-slate-100">
+                        <div className="h-24 w-24 bg-white rounded-[2rem] flex items-center justify-center text-indigo-600 text-3xl font-black italic shadow-sm border border-slate-100 shrink-0">
                           {selectedStaff.full_name.split(' ').map(n => n[0]).join('')}
-                       </div>
-                       <div>
-                          <p className="text-2xl font-black text-slate-900 uppercase italic tracking-tight">{selectedStaff.full_name}</p>
-                          <p className="text-xs font-black text-indigo-500 uppercase tracking-widest">{selectedStaff.email}</p>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-2xl font-black text-slate-900 uppercase italic tracking-tight truncate">{selectedStaff.full_name}</p>
+                          <p className="text-xs font-black text-indigo-500 uppercase tracking-widest truncate">{selectedStaff.email}</p>
                           <div className="flex items-center gap-2 mt-2">
-                             <span className="px-3 py-1 bg-slate-100 rounded-lg text-[9px] font-black uppercase tracking-widest text-slate-500">Current Role: {selectedStaff.ui_role}</span>
+                             <span className="px-3 py-1 bg-white border border-slate-200 rounded-lg text-[9px] font-black uppercase tracking-widest text-slate-500">Current Role: {selectedStaff.ui_role}</span>
                           </div>
-                       </div>
-                    </div>
+                        </div>
+                      </div>
 
-                    <div className="space-y-6">
-                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.25em]">Elevate / Reassign Deployment Level</p>
-                       <div className="grid grid-cols-1 gap-4">
+                      <div className="space-y-6">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.25em]">Elevate / Reassign Deployment Level</p>
+                          {updating && (
+                            <div className="flex items-center gap-2 text-indigo-500 font-bold text-[10px] uppercase tracking-widest">
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              Syncing...
+                            </div>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-1 gap-4">
                           {[
                             { id: 'teacher', label: 'Tactical Invigilator', icon: Calendar, desc: 'Individual timeline & classroom requests only.' },
                             { id: 'manager', label: 'Operational Manager', icon: LayoutDashboard, desc: 'Full live feed analytics & tactical relief control.' },
@@ -231,36 +244,48 @@ export function Layout({ session, roleInfo }: { session: any; roleInfo: UserRole
                               disabled={updating}
                               onClick={() => handleRoleUpdate(role.id as any)}
                               className={cn(
-                                "flex items-center justify-between p-6 rounded-[2rem] border transition-all text-left group",
-                                selectedStaff.ui_role === role.id ? "bg-emerald-50 border-emerald-100" : "bg-white border-slate-100 hover:border-indigo-100 hover:shadow-xl hover:shadow-indigo-500/5"
+                                "flex items-center justify-between p-6 rounded-[2rem] border transition-all text-left group relative outline-none",
+                                selectedStaff.ui_role === role.id 
+                                  ? "bg-emerald-50 border-emerald-200 ring-2 ring-emerald-500/10 shadow-lg shadow-emerald-500/5" 
+                                  : "bg-white border-slate-100 hover:border-indigo-200 hover:shadow-xl hover:shadow-indigo-500/5 hover:-translate-y-0.5 active:translate-y-0"
                               )}
                             >
                                <div className="flex items-center gap-6">
-                                  <div className={cn("h-14 w-14 rounded-2xl flex items-center justify-center transition-colors", selectedStaff.ui_role === role.id ? "bg-emerald-500 text-white" : "bg-slate-50 text-slate-400 group-hover:bg-indigo-500 group-hover:text-white")}>
+                                  <div className={cn(
+                                    "h-14 w-14 rounded-2xl flex items-center justify-center transition-all duration-300", 
+                                    selectedStaff.ui_role === role.id ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/30" : "bg-slate-50 text-slate-400 group-hover:bg-indigo-600 group-hover:text-white group-hover:shadow-lg group-hover:shadow-indigo-500/20"
+                                  )}>
                                      <role.icon className="h-7 w-7" />
                                   </div>
                                   <div>
-                                     <p className={cn("text-lg font-black italic uppercase tracking-tight", selectedStaff.ui_role === role.id ? "text-emerald-900" : "text-slate-900")}>{role.label}</p>
-                                     <p className="text-[10px] font-medium text-slate-500">{role.desc}</p>
+                                     <p className={cn("text-lg font-black italic uppercase tracking-tight transition-colors", selectedStaff.ui_role === role.id ? "text-emerald-900" : "text-slate-900 group-hover:text-indigo-600")}>{role.label}</p>
+                                     <p className="text-[10px] font-medium text-slate-500 line-clamp-1">{role.desc}</p>
                                   </div>
                                </div>
                                {selectedStaff.ui_role === role.id && (
-                                 <div className="h-8 w-8 bg-emerald-500 rounded-full flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
+                                 <motion.div 
+                                   initial={{ scale: 0, opacity: 0 }}
+                                   animate={{ scale: 1, opacity: 1 }}
+                                   className="h-8 w-8 bg-emerald-500 rounded-full flex items-center justify-center text-white shadow-lg shadow-emerald-500/20"
+                                 >
                                     <Check className="h-5 w-5" />
-                                 </div>
+                                 </motion.div>
                                )}
                             </button>
                           ))}
-                       </div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center text-center opacity-30">
-                     <Users className="h-20 w-20 mb-6" />
-                     <p className="text-xl font-black italic uppercase tracking-tight">Deployment Not Selected</p>
-                     <p className="text-xs font-medium">Please select a staff member from the matrix to modify access.</p>
-                  </div>
-                )}
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-center opacity-30 py-20">
+                       <div className="h-24 w-24 bg-slate-100 rounded-full flex items-center justify-center mb-8">
+                         <Users className="h-10 w-10 text-slate-400" />
+                       </div>
+                       <p className="text-xl font-black italic uppercase tracking-tight text-slate-900">Deployment Not Selected</p>
+                       <p className="text-xs font-medium text-slate-500 mt-2">Pick a specialist from the tactical registry on the left.</p>
+                    </div>
+                  )}
+                </div>
               </div>
             </motion.div>
           </div>

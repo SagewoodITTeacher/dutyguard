@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { Shield, Mail, Lock, Loader2, CheckCircle2 } from 'lucide-react';
+import { cn } from '../lib/utils';
 
 export function Login() {
   const [email, setEmail] = useState('');
@@ -28,6 +29,20 @@ export function Login() {
   const quickLogin = async (staffCode: string) => {
     setLoading(true);
     setError(null);
+    
+    // Check if it's a demo user (All quick login buttons are treated as demo for now to facilitate testing)
+    const demoUsers = ['FRAN', 'JOHD', 'AYAM', 'AMOP'];
+    if (demoUsers.includes(staffCode)) {
+      console.log('[DutyGuard] Initiating Demo Protocol for:', staffCode);
+      const demoUserId = `demo-${staffCode.toLowerCase()}-uid`;
+      
+      // Simulate network delay
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      localStorage.setItem('dutyguard_demo_session', demoUserId);
+      window.location.reload(); // Force app reboot to pick up simulated session
+      return;
+    }
     
     // For demo purposes, we assume emails are staffcode@school.edu and password is 'CURRO'
     const { error } = await supabase.auth.signInWithPassword({
@@ -123,17 +138,27 @@ export function Login() {
             <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-6 text-center italic">Quick Deploy (Demo Protocol)</p>
             <div className="grid grid-cols-2 gap-4">
               {[
-                { code: 'FRAN', label: 'FRAN (LOCKED)' },
-                { code: 'JOHD', label: 'JOHD (LOCKED)' },
-                { code: 'AYAM', label: 'AYAM (TEACHER)' },
-                { code: 'AMOP', label: 'AMOP (TEACHER)' }
+                { code: 'FRAN', label: 'FRAN (LOCKED)', demo: true },
+                { code: 'JOHD', label: 'JOHD (LOCKED)', demo: true },
+                { code: 'AYAM', label: 'AYAM (TEACHER)', demo: true },
+                { code: 'AMOP', label: 'AMOP (TEACHER)', demo: true }
               ].map(u => (
                 <button 
                   key={u.code}
                   onClick={() => quickLogin(u.code)}
-                  className="py-4 bg-slate-950 border border-slate-800 rounded-2xl text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-white hover:border-indigo-500/50 transition-all"
+                  className={cn(
+                    "relative py-4 bg-slate-950 border border-slate-800 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:text-white transition-all overflow-hidden group",
+                    u.demo ? "text-amber-500 border-amber-500/20 hover:border-amber-500/50" : "text-slate-400 hover:border-indigo-500/50"
+                  )}
                 >
-                  {u.label}
+                  <span className="relative z-10">{u.label}</span>
+                  {u.demo && (
+                    <span className="absolute -top-1 -right-4 bg-amber-500 text-[8px] px-5 py-2 rotate-12 font-black shadow-lg shadow-amber-500/20">DEMO</span>
+                  )}
+                  <div className={cn(
+                    "absolute inset-0 opacity-0 group-hover:opacity-10 transition-opacity",
+                    u.demo ? "bg-amber-500" : "bg-indigo-500"
+                  )} />
                 </button>
               ))}
             </div>

@@ -36,9 +36,32 @@ export function AdminDashboard() {
   }, []);
 
   async function fetchAdminData() {
+    const isDemo = !!localStorage.getItem('dutyguard_demo_session');
+    
     try {
       setLoading(true);
+      console.log('[DutyGuard] Fetching admin data...', isDemo ? '(DEMO MODE)' : '(REAL MODE)');
       
+      if (isDemo) {
+        // Provide mock data for demo mode to bypass real DB calls
+        await new Promise(resolve => setTimeout(resolve, 800)); // Simulate delay
+        setStats({
+          staffCount: 42,
+          venueCount: 12,
+          pendingSwaps: demoDuties.filter((d: any) => d.status === 'urgent').length,
+          activeSessions: 8 + Math.floor(demoDuties.length / 3)
+        });
+        setRecentAudit([
+          { id: '1', action: 'AUTO_GENERATE', description: 'System deployed engine matrix for Term 2.', changed_at: new Date().toISOString(), changed_by_staff: { full_name: 'Franz Nortjé' } },
+          { id: '2', action: 'ROLE_UPDATE', description: 'Elevated Ayam S. to Operational Manager.', changed_at: new Date(Date.now() - 3600000).toISOString(), changed_by_staff: { full_name: 'Johann de Wet' } }
+        ]);
+        setDuties([
+          { id: '1', status: 'assigned', venues: { name: 'Lab 1' }, staff: { full_name: 'Ayam S' }, exam_sessions: { session_name: 'CS-101', subject_name: 'Computer Science' } },
+          { id: '2', status: 'urgent', venues: { name: 'Great Hall' }, staff: { full_name: 'Amop T' }, exam_sessions: { session_name: 'MA-202', subject_name: 'Mathematics' } }
+        ]);
+        return;
+      }
+
       const [staff, venues, sessions, audit, dutiesResponse] = await Promise.all([
         supabase.from('staff').select('id', { count: 'exact', head: true }),
         supabase.from('venues').select('id', { count: 'exact', head: true }),
@@ -53,10 +76,14 @@ export function AdminDashboard() {
           .limit(10)
       ]);
 
+      if (staff.error) throw staff.error;
+      if (venues.error) throw venues.error;
+      if (sessions.error) throw sessions.error;
+
       setStats({
         staffCount: staff.count || 0,
         venueCount: venues.count || 0,
-        pendingSwaps: 0, // Placeholder
+        pendingSwaps: 0,
         activeSessions: sessions.count || 0
       });
 
@@ -64,15 +91,50 @@ export function AdminDashboard() {
       setDuties(dutiesResponse.data || []);
     } catch (err) {
       console.error('Error fetching admin data:', err);
+      // Fallback to empty state on error instead of hanging
+      setStats({ staffCount: 0, venueCount: 0, pendingSwaps: 0, activeSessions: 0 });
     } finally {
       setLoading(false);
     }
   }
 
   const handleRunGenerator = async () => {
+    const isDemo = !!localStorage.getItem('dutyguard_demo_session');
+    
     try {
       setIsGenerating(true);
       
+      if (isDemo) {
+        console.log('[DutyGuard] Running Auto-Schedule Engine in High-Fidelity Simulation...');
+        await new Promise(resolve => setTimeout(resolve, 2500)); // Simulate deep matrix computation
+
+        const mockDuties = [
+          { id: 'gen-1', status: 'assigned', venues: { name: 'Great Hall' }, staff: { full_name: 'Ayam Staff' }, exam_sessions: { session_name: 'ENG-101', subject_name: 'English Paper 1' } },
+          { id: 'gen-2', status: 'assigned', venues: { name: 'Lab 4' }, staff: { full_name: 'Amop Teacher' }, exam_sessions: { session_name: 'PHY-202', subject_name: 'Physics' } },
+          { id: 'gen-3', status: 'urgent', venues: { name: 'IT Lab 1' }, staff: { full_name: 'Johann de Wet' }, exam_sessions: { session_name: 'IT-303', subject_name: 'Information Tech' } },
+          { id: 'gen-4', status: 'assigned', venues: { name: 'Great Hall' }, staff: { full_name: 'Franz Nortjé' }, exam_sessions: { session_name: 'ENG-101', subject_name: 'English Paper 1' } },
+          { id: 'gen-5', status: 'assigned', venues: { name: 'Lab 1' }, staff: { full_name: 'Amop Teacher' }, exam_sessions: { session_name: 'CS-101', subject_name: 'Computer Science' } }
+        ];
+
+        localStorage.setItem('dutyguard_demo_generated_duties', JSON.stringify(mockDuties));
+        
+        // Add generation log to audit
+        const newLog = { 
+          id: Date.now().toString(), 
+          action: 'AUTO_GENERATE', 
+          description: `Matrix Optimized: Applied Homeroom Wed & Lab Priority. Sync complete.`, 
+          changed_at: new Date().toISOString(), 
+          changed_by_staff: { full_name: 'Franz Nortjé' } 
+        };
+        const currentAudit = JSON.parse(localStorage.getItem('dutyguard_demo_audit') || '[]');
+        localStorage.setItem('dutyguard_demo_audit', JSON.stringify([newLog, ...currentAudit].slice(0, 5)));
+
+        (window as any).toast?.(`Matrix Computed: ${mockDuties.length} assignments deployed with 0 collisions.`, 'success');
+        setShowSchedulerModal(false);
+        fetchAdminData();
+        return;
+      }
+
       // 1. Fetch all required data
       const [
         { data: allStaff },

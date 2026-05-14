@@ -155,7 +155,30 @@ export function ManagerDashboard() {
   };
 
   async function fetchPendingAlerts() {
+    const isDemo = !!localStorage.getItem('dutyguard_demo_session');
+    
     try {
+      if (isDemo) {
+        setActiveAlerts([
+          { 
+            id: 'a1', 
+            type: 'help', 
+            request_type: 'bathroom', 
+            created_at: new Date(Date.now() - 300000).toISOString(),
+            duty: { staff: { full_name: 'Ayam Staff' }, venue: { name: 'Great Hall' } } 
+          },
+          { 
+            id: 'a2', 
+            type: 'leave', 
+            reason: 'Medical emergency - needs immediate relief.', 
+            created_at: new Date(Date.now() - 600000).toISOString(),
+            staff: { full_name: 'Amop Teacher' },
+            session_id: 's1'
+          }
+        ]);
+        return;
+      }
+
       const { data: help, error: helpErr } = await supabase
         .from('help_requests')
         .select('*, duty:duties(staff:staff(full_name), venue:venues(name))')
@@ -204,8 +227,26 @@ export function ManagerDashboard() {
   };
 
   async function fetchDashboardData() {
+    const isDemo = !!localStorage.getItem('dutyguard_demo_session');
+
     try {
       setLoading(true);
+      console.log('[DutyGuard] Fetching manager data...', isDemo ? '(DEMO MODE)' : '(REAL MODE)');
+
+      if (isDemo) {
+        await new Promise(resolve => setTimeout(resolve, 800)); // Simulate delay
+        setWorkloadData([
+          { full_name: 'Franz Nortjé', invigilation_count: 5, standby_count: 2, tech_duty_count: 0, total_duties: 7 },
+          { full_name: 'Johann de Wet', invigilation_count: 3, standby_count: 4, tech_duty_count: 1, total_duties: 8 },
+          { full_name: 'Ayam Staff', invigilation_count: 8, standby_count: 1, tech_duty_count: 0, total_duties: 9 }
+        ] as any);
+        setMarkingData([
+          { subject_id: '1', subject_name: 'English Paper 1', writing_date: '2024-05-20', status: 'Completed' },
+          { subject_id: '2', subject_name: 'Mathematics', writing_date: '2024-05-22', status: 'Marking' },
+          { subject_id: '3', subject_name: 'Physical Sciences', writing_date: '2024-05-25', status: 'Not Written' }
+        ] as any);
+        return;
+      }
       
       const { data: workload, error: workloadError } = await supabase
         .from('vw_teacher_workload')

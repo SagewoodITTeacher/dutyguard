@@ -35,8 +35,60 @@ export function TeacherDashboard() {
   }, []);
 
   async function fetchStaffAndDuties() {
+    const isDemo = !!localStorage.getItem('dutyguard_demo_session');
+    const demoUserId = localStorage.getItem('dutyguard_demo_session');
+
     try {
       setLoading(true);
+      
+      if (isDemo) {
+        console.log('[DutyGuard] Running Teacher Dashboard in Demo Mode');
+        await new Promise(resolve => setTimeout(resolve, 800)); // Simulate delay
+        
+        const isAyam = demoUserId === 'demo-ayam-uid' || demoUserId?.includes('ayam');
+        
+        setStaff({
+          id: isAyam ? 'ayam-id' : 'amop-id',
+          full_name: isAyam ? 'Ayam Staff' : 'Amop Teacher',
+          email: `${isAyam ? 'ayam' : 'amop'}@school.edu`,
+          staff_code: isAyam ? 'AYAM' : 'AMOP'
+        });
+
+        setDuties([
+          { 
+            id: 'd1', 
+            staff_id: 'ayam-id', 
+            role: 'Invigilator', 
+            venue_name: 'Great Hall', 
+            subject_name: 'English Paper 1', 
+            start_time: '08:00', 
+            end_time: '10:00',
+            session_id: 's1'
+          },
+          { 
+            id: 'd2', 
+            staff_id: 'ayam-id', 
+            role: 'Standby', 
+            venue_name: 'Staff Room', 
+            subject_name: 'Maths Literacy', 
+            start_time: '11:00', 
+            end_time: '13:00',
+            session_id: 's2'
+          },
+          { 
+            id: 'd3', 
+            staff_id: 'ayam-id', 
+            role: 'Invigilator', 
+            venue_name: 'Lab 4', 
+            subject_name: 'Physics', 
+            start_time: '14:00', 
+            end_time: '16:00',
+            session_id: 's3'
+          }
+        ] as any);
+        return;
+      }
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 

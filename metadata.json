@@ -1,0 +1,6 @@
+{
+  "name": "DutyGuard",
+  "description": "A production-ready Exam Invigilation & Duty Management system with auto-generation, mobile daily timeline, help request system, and emergency swap audit logs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

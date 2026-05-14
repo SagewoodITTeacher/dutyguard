@@ -21,6 +21,7 @@ export function AdminDashboard() {
   });
   const [loading, setLoading] = useState(true);
   const [recentAudit, setRecentAudit] = useState<any[]>([]);
+  const [duties, setDuties] = useState<any[]>([]);
   const [showSchedulerModal, setShowSchedulerModal] = useState(false);
   const [scheduleOptions, setScheduleOptions] = useState({
     startDate: new Date().toISOString().split('T')[0],
@@ -38,14 +39,18 @@ export function AdminDashboard() {
     try {
       setLoading(true);
       
-      const [staff, venues, sessions, audit] = await Promise.all([
+      const [staff, venues, sessions, audit, dutiesResponse] = await Promise.all([
         supabase.from('staff').select('id', { count: 'exact', head: true }),
         supabase.from('venues').select('id', { count: 'exact', head: true }),
         supabase.from('exam_sessions').select('id', { count: 'exact', head: true }),
         supabase.from('duty_audit_log')
           .select('*, changed_by_staff:staff!changed_by(full_name)')
           .order('changed_at', { ascending: false })
-          .limit(5)
+          .limit(5),
+        supabase.from('exam_duties')
+          .select('*, staff(full_name), venues(name), exam_sessions(session_name, date, subject_name)')
+          .order('created_at', { ascending: false })
+          .limit(10)
       ]);
 
       setStats({
@@ -56,6 +61,7 @@ export function AdminDashboard() {
       });
 
       setRecentAudit(audit.data || []);
+      setDuties(dutiesResponse.data || []);
     } catch (err) {
       console.error('Error fetching admin data:', err);
     } finally {
@@ -64,11 +70,122 @@ export function AdminDashboard() {
   }
 
   const handleRunGenerator = async () => {
-    setIsGenerating(true);
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    setIsGenerating(false);
-    setShowSchedulerModal(false);
-    (window as any).toast?.('Auto-Schedule Completed', 'success');
+    try {
+      setIsGenerating(true);
+      
+      // 1. Fetch all required data
+      const [
+        { data: allStaff },
+        { data: allVenues },
+        { data: sessions },
+        { data: existingDuties },
+        { data: leaveRequests }
+      ] = await Promise.all([
+        supabase.from('staff').select('*'),
+        supabase.from('venues').select('*'),
+        supabase.from('exam_sessions').select('*')
+          .gte('date', scheduleOptions.startDate)
+          .lte('date', scheduleOptions.endDate),
+        supabase.from('exam_duties').select('*, exam_sessions!inner(date)'),
+        supabase.from('emergency_leave_requests').select('*').eq('status', 'approved')
+      ]);
+
+      if (!allStaff || !allVenues || !sessions) {
+        throw new Error('Required data missing for scheduling');
+      }
+
+      const newDuties: any[] = [];
+      const staffDailyLoad: Record<string, Record<string, number>> = {}; // staff_id -> date -> count
+
+      // Initialize load counts from existing duties
+      existingDuties?.forEach(d => {
+        const date = d.exam_sessions.date;
+        if (!staffDailyLoad[d.staff_id]) staffDailyLoad[d.staff_id] = {};
+        staffDailyLoad[d.staff_id][date] = (staffDailyLoad[d.staff_id][date] || 0) + 1;
+      });
+
+      // Simple greedy scheduling algorithm
+      for (const session of sessions) {
+        for (const venue of allVenues) {
+          // Check if this session/venue already has an assignment
+          const isAssigned = existingDuties?.some(d => d.session_id === session.id && d.venue_id === venue.id);
+          if (isAssigned) continue;
+
+          // Find an available staff member
+          const staffOnLeave = leaveRequests?.filter(r => r.date === session.date).map(r => r.staff_id) || [];
+          const staffInThisSession = [
+            ...(existingDuties?.filter(d => d.session_id === session.id).map(d => d.staff_id) || []),
+            ...newDuties.filter(d => d.session_id === session.id).map(d => d.staff_id)
+          ];
+
+          // Priority sorting for staff
+          const candidates = [...allStaff]
+            .filter(s => !staffOnLeave.includes(s.id))
+            .filter(s => !staffInThisSession.includes(s.id))
+            .filter(s => (staffDailyLoad[s.id]?.[session.date] || 0) < scheduleOptions.maxPerDay)
+            .sort((a, b) => {
+              // Load balancing: prefer staff with fewer duties on this day
+              const loadA = staffDailyLoad[a.id]?.[session.date] || 0;
+              const loadB = staffDailyLoad[b.id]?.[session.date] || 0;
+              if (loadA !== loadB) return loadA - loadB;
+
+              // Tech priority
+              if (scheduleOptions.techPriority && (venue.type === 'Lab' || venue.name.toLowerCase().includes('lab'))) {
+                const isTechA = a.department?.toLowerCase() === 'it' || a.department?.toLowerCase() === 'science';
+                const isTechB = b.department?.toLowerCase() === 'it' || b.department?.toLowerCase() === 'science';
+                if (isTechA && !isTechB) return -1;
+                if (!isTechA && isTechB) return 1;
+              }
+              return 0;
+            });
+
+          if (candidates.length > 0) {
+            const selectedStaff = candidates[0];
+            newDuties.push({
+              session_id: session.id,
+              staff_id: selectedStaff.id,
+              venue_id: venue.id,
+              role: 'invigilator',
+              status: 'assigned'
+            });
+
+            // Update local load tracking
+            if (!staffDailyLoad[selectedStaff.id]) staffDailyLoad[selectedStaff.id] = {};
+            staffDailyLoad[selectedStaff.id][session.date] = (staffDailyLoad[selectedStaff.id][session.date] || 0) + 1;
+          }
+        }
+      }
+
+      if (newDuties.length === 0) {
+        (window as any).toast?.('No new duties could be generated', 'info');
+        setIsGenerating(false);
+        return;
+      }
+
+      // 2. Insert into Database
+      const { error: insertError } = await supabase
+        .from('exam_duties')
+        .insert(newDuties);
+
+      if (insertError) throw insertError;
+
+      // 3. Log Audit
+      const { data: userData } = await supabase.auth.getUser();
+      await supabase.from('duty_audit_log').insert({
+        action: 'AUTO_GENERATE',
+        description: `Successfully deployed engine matrix. Generated ${newDuties.length} duties from ${scheduleOptions.startDate} to ${scheduleOptions.endDate}.`,
+        changed_by: userData.user?.id
+      });
+
+      (window as any).toast?.(`Matrix Computed: ${newDuties.length} assignments deployed`, 'success');
+      setShowSchedulerModal(false);
+      fetchAdminData();
+    } catch (err) {
+      console.error('Scheduler Error:', err);
+      (window as any).toast?.('Engine Malfunction: Failed to deploy matrix', 'error');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   if (loading) {
@@ -161,35 +278,26 @@ export function AdminDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {[
-                    { id: 1, session: 'MON AM: Session 1', subject: 'Mathematics P1', room: 'Great Hall', status: 'Deployed', staff: 'F. Nortjé' },
-                    { id: 2, session: 'MON AM: Session 1', subject: 'Mathematics P1', room: 'Gymnasium', status: 'Deployed', staff: 'S. Kunene' },
-                    { id: 3, session: 'MON PM: Session 2', subject: 'English Lit', room: 'Hall B', status: 'Warning', staff: 'Unassigned', alert: true },
-                    { id: 4, session: 'TUE AM: Session 1', subject: 'Physical Science', room: 'Lab 1', status: 'Scheduled', staff: 'J. Fourie' },
-                  ].map((row) => (
+                  {duties.map((row) => (
                     <tr key={row.id} className="hover:bg-indigo-50/20 transition-colors group">
                       <td className="px-10 py-6">
-                        <p className="text-sm font-black text-slate-900 uppercase tracking-tight italic">{row.session}</p>
-                        <p className="text-[10px] font-bold text-slate-400">{row.subject}</p>
+                        <p className="text-sm font-black text-slate-900 uppercase tracking-tight italic">{row.exam_sessions?.session_name}</p>
+                        <p className="text-[10px] font-bold text-slate-400">{row.exam_sessions?.subject_name}</p>
                       </td>
                       <td className="px-6 py-6 font-bold text-slate-600 text-sm">
-                        {row.alert ? (
-                          <span className="flex items-center gap-2 text-red-500 font-black italic">
-                            <AlertCircle className="h-4 w-4" /> RE-ASSIGN REQUIRED
-                          </span>
-                        ) : row.staff}
+                        {row.staff?.full_name}
                       </td>
                       <td className="px-6 py-6">
                         <span className="bg-slate-100 text-slate-600 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider border border-slate-200/50">
-                          {row.room}
+                          {row.venues?.name}
                         </span>
                       </td>
                       <td className="px-6 py-6">
                         <div className="flex items-center gap-2">
                            <span className={cn(
                              "h-1.5 w-1.5 rounded-full",
-                             row.status === 'Deployed' ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 
-                             row.status === 'Warning' ? 'bg-red-500 animate-pulse' : 'bg-slate-300'
+                             row.status === 'assigned' ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 
+                             row.status === 'urgent' ? 'bg-red-500 animate-pulse' : 'bg-slate-300'
                            )}></span>
                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{row.status}</span>
                         </div>
@@ -201,6 +309,13 @@ export function AdminDashboard() {
                       </td>
                     </tr>
                   ))}
+                  {duties.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="text-center py-10 opacity-30">
+                        <p className="text-xs font-black uppercase tracking-widest">No duty data available</p>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

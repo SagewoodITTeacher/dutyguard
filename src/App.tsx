@@ -11,22 +11,39 @@ import { AdminTeachers } from './pages/AdminTeachers';
 import { AdminVenues } from './pages/AdminVenues';
 import { ManagerDashboard } from './pages/ManagerDashboard';
 import { Login } from './pages/Login';
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { supabase } from './lib/supabase';
 import { Toaster } from './components/ui/Toaster';
+import { getUserRoleInfo, UserRoleInfo } from './services/authService';
 
 export default function App() {
   const [session, setSession] = useState<any>(null);
+  const [roleInfo, setRoleInfo] = useState<UserRoleInfo | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    async function initializeAuth() {
+      const { data: { session } } = await supabase.auth.getSession();
       setSession(session);
+      
+      if (session) {
+        const info = await getUserRoleInfo(session.user.id);
+        setRoleInfo(info);
+      }
+      
       setLoading(false);
-    });
+    }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    initializeAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session);
+      if (session) {
+        const info = await getUserRoleInfo(session.user.id);
+        setRoleInfo(info);
+      } else {
+        setRoleInfo(null);
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -48,13 +65,38 @@ export default function App() {
       <Routes>
         <Route path="/login" element={!session ? <Login /> : <Navigate to="/" />} />
         
-        <Route element={<Layout session={session} />}>
-          <Route path="/" element={session ? <RoleBasedRedirect session={session} /> : <Navigate to="/login" />} />
-          <Route path="/teacher" element={<TeacherDashboard />} />
-          <Route path="/manager" element={<ManagerDashboard />} />
-          <Route path="/admin" element={<AdminDashboard />} />
-          <Route path="/admin/teachers" element={<AdminTeachers />} />
-          <Route path="/admin/venues" element={<AdminVenues />} />
+        <Route element={<Layout session={session} roleInfo={roleInfo} />}>
+          <Route path="/" element={session && roleInfo ? <RoleBasedRedirect roleInfo={roleInfo} /> : <Navigate to="/login" />} />
+          
+          <Route path="/teacher" element={
+            <ProtectedRoute allowedRoles={['teacher', 'manager', 'admin']} userRole={roleInfo?.ui_role}>
+              <TeacherDashboard />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/manager" element={
+            <ProtectedRoute allowedRoles={['manager', 'admin']} userRole={roleInfo?.ui_role}>
+              <ManagerDashboard />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/admin" element={
+            <ProtectedRoute allowedRoles={['admin']} userRole={roleInfo?.ui_role}>
+              <AdminDashboard />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/admin/teachers" element={
+            <ProtectedRoute allowedRoles={['admin']} userRole={roleInfo?.ui_role}>
+              <AdminTeachers />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/admin/venues" element={
+            <ProtectedRoute allowedRoles={['admin']} userRole={roleInfo?.ui_role}>
+              <AdminVenues />
+            </ProtectedRoute>
+          } />
         </Route>
 
         <Route path="*" element={<Navigate to="/" />} />
@@ -64,15 +106,25 @@ export default function App() {
   );
 }
 
-function RoleBasedRedirect({ session }: { session: any }) {
-  // Simple role simulation based on email or persistence
-  const forcedRole = localStorage.getItem('dutyguard_forced_role');
-  if (forcedRole) return <Navigate to={`/${forcedRole}`} />;
+function ProtectedRoute({ 
+  children, 
+  allowedRoles, 
+  userRole 
+}: { 
+  children: React.ReactNode; 
+  allowedRoles: string[]; 
+  userRole?: string;
+}) {
+  if (!userRole) return null;
+  if (!allowedRoles.includes(userRole)) {
+    return <Navigate to="/" replace />;
+  }
+  return <>{children}</>;
+}
 
-  const email = session.user?.email;
-  if (email?.includes('admin')) return <Navigate to="/admin" />;
-  if (email?.includes('manager')) return <Navigate to="/manager" />;
-  
+function RoleBasedRedirect({ roleInfo }: { roleInfo: UserRoleInfo }) {
+  if (roleInfo.ui_role === 'admin') return <Navigate to="/admin" />;
+  if (roleInfo.ui_role === 'manager') return <Navigate to="/manager" />;
   return <Navigate to="/teacher" />;
 }
 

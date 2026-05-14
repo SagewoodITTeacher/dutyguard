@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { Shield, Mail, Lock, Loader2 } from 'lucide-react';
+import { Shield, Mail, Lock, Loader2, CheckCircle2 } from 'lucide-react';
 
 export function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,51 +25,82 @@ export function Login() {
     }
   };
 
+  const quickLogin = async (staffCode: string) => {
+    setLoading(true);
+    setError(null);
+    
+    // For demo purposes, we assume emails are staffcode@school.edu and password is 'CURRO'
+    const { error } = await supabase.auth.signInWithPassword({
+      email: `${staffCode.toLowerCase()}@school.edu`,
+      password: 'CURRO',
+    });
+
+    if (error) {
+      setError(error.message);
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
+      <div className="w-full max-w-[480px]">
         <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center p-3 bg-indigo-600 rounded-2xl shadow-xl shadow-indigo-100 mb-6">
-            <Shield className="h-10 w-10 text-white" />
+          <div className="inline-flex items-center justify-center p-4 bg-indigo-600 rounded-[2rem] shadow-2xl shadow-indigo-500/20 mb-6 rotate-3">
+            <Shield className="h-12 w-12 text-white" />
           </div>
-          <h1 className="text-4xl font-extrabold text-slate-950 tracking-tight mb-2">DutyGuard</h1>
-          <p className="text-slate-500 font-medium">Exam Invigilation Management System</p>
+          <h1 className="text-5xl font-black text-white tracking-tighter italic leading-none mb-4">DutyGuard</h1>
+          <p className="text-slate-400 font-bold uppercase tracking-[0.2em] text-[10px]">Access Operations Matrix</p>
         </div>
 
-        <div className="bg-white p-8 rounded-3xl shadow-xl shadow-slate-200 border border-slate-100">
-          <form onSubmit={handleLogin} className="space-y-6">
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-2 uppercase tracking-wide">Email Address</label>
-              <div className="relative">
-                <Mail className="absolute left-4 top-3.5 h-5 w-5 text-slate-400" />
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none font-medium"
-                  placeholder="name@school.edu"
-                  required
-                />
+        <div className="bg-[#0f172a] p-10 rounded-[3rem] shadow-2xl border border-slate-800 shadow-black/50">
+          <form onSubmit={handleLogin} className="space-y-8">
+            <div className="space-y-6">
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 mb-3 uppercase tracking-widest pl-2">Email Address</label>
+                <div className="relative">
+                  <Mail className="absolute left-6 top-5 h-5 w-5 text-slate-600" />
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full pl-16 pr-6 py-5 bg-slate-950 border border-slate-800 rounded-[1.8rem] focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500/50 transition-all outline-none font-bold text-white placeholder:text-slate-700"
+                    placeholder="nortje.f@school.edu"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 mb-3 uppercase tracking-widest pl-2">Security Key</label>
+                <div className="relative">
+                  <Lock className="absolute left-6 top-5 h-5 w-5 text-slate-600" />
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full pl-16 pr-6 py-5 bg-slate-950 border border-slate-800 rounded-[1.8rem] focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500/50 transition-all outline-none font-bold text-white placeholder:text-slate-700"
+                    placeholder="••••••••"
+                    required
+                  />
+                </div>
               </div>
             </div>
 
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-2 uppercase tracking-wide">Password</label>
-              <div className="relative">
-                <Lock className="absolute left-4 top-3.5 h-5 w-5 text-slate-400" />
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none font-medium"
-                  placeholder="••••••••"
-                  required
-                />
-              </div>
+            <div className="flex items-center justify-between px-2">
+              <label className="flex items-center gap-3 cursor-pointer group">
+                <div 
+                  onClick={() => setRememberMe(!rememberMe)}
+                  className={`h-6 w-6 rounded-lg border-2 flex items-center justify-center transition-all ${rememberMe ? 'bg-indigo-600 border-indigo-500' : 'border-slate-800'}`}
+                >
+                  {rememberMe && <CheckCircle2 className="h-4 w-4 text-white" />}
+                </div>
+                <span className="text-xs font-black text-slate-400 uppercase tracking-widest group-hover:text-slate-200 transition-colors">Remember Device</span>
+              </label>
+              <button type="button" className="text-[10px] font-black text-indigo-500 uppercase tracking-widest hover:text-indigo-400 transition-colors">Emergency Access</button>
             </div>
 
             {error && (
-              <div className="p-4 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm font-medium animate-shake">
+              <div className="p-5 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-500 text-xs font-black uppercase tracking-tight text-center">
                 {error}
               </div>
             )}
@@ -76,15 +108,36 @@ export function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-lg shadow-indigo-200 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
+              className="w-full py-6 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black uppercase tracking-[0.2em] text-[11px] shadow-2xl shadow-indigo-600/20 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-3 group"
             >
-              {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Sign Into DutyGuard"}
+              {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : (
+                <>
+                  Deploy Interface
+                  <Shield className="h-4 w-4 group-hover:rotate-12 transition-transform" />
+                </>
+              )}
             </button>
-
-            <div className="text-center pt-2">
-              <span className="text-sm text-slate-400">Use the admin provided credentials to login.</span>
-            </div>
           </form>
+
+          <div className="mt-12 pt-10 border-t border-slate-800">
+            <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-6 text-center italic">Quick Deploy (Demo Protocol)</p>
+            <div className="grid grid-cols-2 gap-4">
+              {[
+                { code: 'FRAN', label: 'FRAN (LOCKED)' },
+                { code: 'JOHD', label: 'JOHD (LOCKED)' },
+                { code: 'AYAM', label: 'AYAM (TEACHER)' },
+                { code: 'AMOP', label: 'AMOP (TEACHER)' }
+              ].map(u => (
+                <button 
+                  key={u.code}
+                  onClick={() => quickLogin(u.code)}
+                  className="py-4 bg-slate-950 border border-slate-800 rounded-2xl text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-white hover:border-indigo-500/50 transition-all"
+                >
+                  {u.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>

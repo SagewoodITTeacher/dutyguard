@@ -4,6 +4,7 @@ import {
   Warehouse, 
   AlertCircle, 
   Calendar, 
+  CalendarX,
   ChevronRight, 
   ArrowRight,
   Download,
@@ -68,12 +69,13 @@ export function AdminDashboard() {
   const [selectedReplacementId, setSelectedReplacementId] = useState<string | null>(null);
   const [recentAudit, setRecentAudit] = useState<any[]>([]);
   const [timeLeft, setTimeLeft] = useState('00:00:00');
-  const [scheduleOptions, setScheduleOptions] = useState({
-     startDate: new Date().toISOString().split('T')[0],
-     endDate: new Date().toISOString().split('T')[0],
-     respectHomeroom: true,
-     techPriority: true
-  });
+  const [leaveRequests, setLeaveRequests] = useState([
+    { id: '1', teacher: 'Franz Nortjé', date: '2026-05-20', fullDay: true, startTime: '--:--', endTime: '--:--', reason: 'Medical Appointment', status: 'Pending' },
+    { id: '2', teacher: 'Sarah Jenkins', date: '2026-05-21', fullDay: false, startTime: '08:00', endTime: '11:30', reason: 'Doctor Consult', status: 'Accepted' },
+    { id: '3', teacher: 'Brown E.', date: '2026-05-22', fullDay: true, startTime: '--:--', endTime: '--:--', reason: 'Personal Leave', status: 'Pending' },
+    { id: '4', teacher: 'Lubbe M.', date: '2026-05-18', fullDay: true, startTime: '--:--', endTime: '--:--', reason: 'Training', status: 'Denied' },
+    { id: '5', teacher: 'Amop Teacher', date: '2026-05-25', fullDay: false, startTime: '12:00', endTime: '14:30', reason: 'Workshop', status: 'Pending' }
+  ]);
 
   const mockConflicts = [
     { date: '20 May', staffCode: 'AMOP', description: 'is on leave (full day)' },
@@ -382,6 +384,9 @@ export function AdminDashboard() {
           <Link to="/admin/venues" className="px-6 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-700 font-black uppercase text-[10px] tracking-widest hover:bg-slate-50 transition-all flex items-center gap-2">
             <Warehouse className="h-4 w-4 text-emerald-600" /> Venues Matrix
           </Link>
+          <Link to="/admin/full-schedule" className="px-6 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-700 font-black uppercase text-[10px] tracking-widest hover:bg-slate-50 transition-all flex items-center gap-2">
+            <Calendar className="h-4 w-4 text-indigo-600" /> Full Schedule Manual Editing
+          </Link>
           <div className="w-px h-8 bg-slate-200 mx-2 hidden sm:block" />
           <button onClick={() => setShowSchedulerModal(true)} className="px-6 py-2.5 bg-indigo-600 text-white rounded-xl font-black uppercase text-[10px] tracking-widest hover:bg-indigo-700 shadow-lg shadow-indigo-500/20 transition-all flex items-center gap-2">
             <Sparkles className="h-4 w-4" /> Optimization Engine
@@ -389,32 +394,54 @@ export function AdminDashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-        {[
-          { label: 'Personnel Registry', value: stats.staffCount, sub: 'Active Tactical Pool', color: 'text-indigo-600', icon: Users },
-          { label: 'Exam Venues', value: stats.venueCount, sub: 'Secured Zones', color: 'text-emerald-600', icon: Warehouse },
-          { label: 'Active Sessions', value: stats.activeSessions, sub: 'Current Deployment', color: 'text-blue-600', icon: Calendar },
-          { label: 'Conflicts Detected', value: stats.pendingSwaps, sub: 'Action Required', color: 'text-red-600', icon: AlertCircle, onClick: () => setShowConflictsModal(true) },
-        ].map((stat, i) => (
-          <button key={i} onClick={stat.onClick} className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-2xl transition-all group text-left">
-            <div className="flex justify-between items-start mb-6">
-              <div className={cn("p-4 rounded-2xl", stat.color.replace('text', 'bg').replace('600', '50'))}>
-                <stat.icon className={cn("h-7 w-7", stat.color)} />
-              </div>
-              <ChevronRight className="h-5 w-5 text-slate-300 group-hover:text-slate-950 transition-colors" />
+      <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-2xl transition-all group">
+         <div className="flex justify-between items-center mb-8">
+            <div className="flex items-center gap-6">
+               <div className="p-4 bg-red-50 rounded-2xl">
+                  <AlertCircle className="h-8 w-8 text-red-600" />
+               </div>
+               <div>
+                  <h3 className="text-2xl font-black text-slate-900 italic uppercase">Conflicts Detected</h3>
+                  <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-1">Operational Integrity Review Required</p>
+               </div>
             </div>
-            <p className="text-4xl font-black text-slate-900 italic leading-none mb-2">{stat.value}</p>
-            <p className="text-[11px] font-black uppercase text-slate-400 tracking-widest">{stat.label}</p>
-            <div className="mt-6 pt-6 border-t border-slate-50 flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-indigo-500">
-               {stat.sub} <ArrowRight className="h-3 w-3" />
+            <div className="text-right">
+               <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">Total Incidents</p>
+               <p className="text-4xl font-black text-red-600 italic">07</p>
             </div>
-          </button>
-        ))}
+         </div>
+         
+         <div className="bg-slate-50/50 rounded-[2rem] border border-slate-100/50 p-8 max-h-[300px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
+            <div className="space-y-4">
+               {[
+                 "20 May - (AMOP) is on leave. (full day)",
+                 "22 May - (LOGF) is teaching 8 or 9 and is used. (P5)",
+                 "24 May - (AYAM) teach [Economics] grade 12 and invigilating her own subject.",
+                 "26 May - Marathon teacher (LOGF) is not assigned sequentially.",
+                 "26 May - Marathon teacher (LOGF) is not assigned at same venue.",
+                 "29 May - (EZRN) doing Tech duty and other duty on the same day.",
+                 "15 Jun - Scattered teacher(FRAN) assigned sequentially. (p2,p3)"
+               ].map((conflict, i) => (
+                 <div key={i} className="flex items-center gap-4 py-3 border-b border-slate-100 last:border-0">
+                    <div className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                    <p className="text-xs font-bold text-slate-700 font-mono tracking-tight">{conflict}</p>
+                 </div>
+               ))}
+            </div>
+         </div>
+         
+         <div className="mt-8 flex items-center justify-between">
+            <p className="text-base font-black text-slate-900 uppercase italic">
+               Status: <span className="text-red-600">Immediate Correction Advised</span>
+            </p>
+            <p className="text-base font-black text-slate-900 uppercase">
+               NUMBER OF CONFLICTS: <span className="text-red-600">7</span>
+            </p>
+         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-        <div className="lg:col-span-10 space-y-10">
-          <div className="bg-white rounded-[4rem] border border-slate-200 shadow-2xl shadow-slate-200/40 overflow-hidden">
+      <div className="w-full space-y-10">
+        <div className="bg-white rounded-[4rem] border border-slate-200 shadow-2xl shadow-slate-200/40 overflow-hidden">
             <div className="p-10 border-b border-slate-100 bg-slate-50/50">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
                 <div>
@@ -727,37 +754,9 @@ export function AdminDashboard() {
           </div>
         </div>
 
-        <div className="lg:col-span-2 space-y-10">
-          <div className="bg-slate-950 rounded-[3rem] p-8 text-white shadow-2xl border border-slate-800">
-             <div className="flex items-center gap-3 mb-8">
-                <History className="h-5 w-5 text-indigo-400" />
-                <h3 className="text-lg font-black italic tracking-tight uppercase">Audit Trail</h3>
-             </div>
-             <div className="space-y-6">
-                {recentAudit.map((log, i) => (
-                  <div key={log.id} className="relative pl-6 before:absolute before:left-0 before:top-2 before:bottom-0 before:w-px before:bg-white/10">
-                     <div className="absolute left-[-3px] top-1.5 h-1.5 w-1.5 rounded-full bg-indigo-500 shadow-[0_0_8px_#6366f1]" />
-                     <p className="text-[10px] font-black text-white leading-tight uppercase tracking-tight mb-1">{log.action}</p>
-                     <p className="text-[8px] text-slate-500 font-medium leading-relaxed truncate">{log.description}</p>
-                     <p className="text-[8px] font-black text-slate-600 uppercase tracking-widest mt-1">{new Date(log.changed_at).toLocaleTimeString()}</p>
-                  </div>
-                ))}
-             </div>
-          </div>
 
-          <div className="bg-indigo-600 rounded-[3rem] p-8 text-white shadow-2xl">
-             <h3 className="text-lg font-black italic mb-4 uppercase">Integrity</h3>
-             <div className="space-y-3">
-                {['Collision', 'Fairness', 'Load Ball.', 'Sync'].map((check, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                     <CheckCircle2 className="h-3 w-3 text-indigo-300" />
-                     <span className="text-[9px] font-bold uppercase tracking-widest opacity-80">{check}</span>
-                  </div>
-                ))}
-             </div>
-          </div>
-        </div>
-      </div>
+
+
 
       <AnimatePresence>
         {showOpsModal && (
@@ -953,6 +952,182 @@ export function AdminDashboard() {
           </div>
         )}
       </AnimatePresence>
+      {/* Scheduled Leave Requests Table */}
+      <div className="bg-white rounded-[4rem] border border-slate-200 shadow-2xl shadow-slate-200/40 overflow-hidden">
+        <div className="p-10 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+          <div>
+            <h3 className="text-3xl font-black text-slate-950 tracking-tight italic uppercase">Scheduled Leave Requests</h3>
+            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 mt-1">Personnel Absence Log & Approval Matrix</p>
+          </div>
+          <div className="h-14 w-14 bg-indigo-50 border border-indigo-100 rounded-3xl flex items-center justify-center text-indigo-600 shadow-sm">
+            <CalendarX className="h-7 w-7" />
+          </div>
+        </div>
+        
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50/30 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 border-b border-slate-100 italic">
+                <th className="px-10 py-6">Teacher</th>
+                <th className="px-6 py-6">Date</th>
+                <th className="px-6 py-6 text-center">Full Day</th>
+                <th className="px-6 py-6 font-mono">Start</th>
+                <th className="px-6 py-6 font-mono">End</th>
+                <th className="px-6 py-6">Reason</th>
+                <th className="px-6 py-6">Status</th>
+                <th className="px-10 py-6 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {(() => {
+                return [...leaveRequests].sort((a, b) => {
+                  // Pending at top
+                  if (a.status === 'Pending' && b.status !== 'Pending') return -1;
+                  if (a.status !== 'Pending' && b.status === 'Pending') return 1;
+                  
+                  // Alphabetical by teacher (simplified surname sort)
+                  const nameA = a.teacher.split(' ').reverse().join(' ');
+                  const nameB = b.teacher.split(' ').reverse().join(' ');
+                  return nameA.localeCompare(nameB);
+                }).map((req) => (
+                  <tr key={req.id} className="group hover:bg-slate-50/50 transition-colors">
+                    <td className="px-10 py-6 font-black text-slate-900 uppercase italic tracking-tight">{req.teacher}</td>
+                    <td className="px-6 py-6 font-bold text-slate-500 whitespace-nowrap">{new Date(req.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</td>
+                    <td className="px-6 py-6 text-center">
+                      <span className={cn(
+                        "inline-flex h-2 w-2 rounded-full",
+                        req.fullDay ? "bg-indigo-500 shadow-[0_0_8px_#6366f1]" : "bg-slate-200"
+                      )} />
+                    </td>
+                    <td className="px-6 py-6 font-mono text-xs text-slate-400">{req.startTime}</td>
+                    <td className="px-6 py-6 font-mono text-xs text-slate-400">{req.endTime}</td>
+                    <td className="px-6 py-6">
+                      <p className="text-xs font-bold text-slate-600 line-clamp-1 max-w-[200px]">{req.reason}</p>
+                    </td>
+                    <td className="px-6 py-6">
+                      <span className={cn(
+                        "px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-[0.1em] border",
+                        req.status === 'Pending' ? "bg-amber-50 text-amber-600 border-amber-200" :
+                        req.status === 'Accepted' ? "bg-emerald-50 text-emerald-600 border-emerald-200" :
+                        "bg-red-50 text-red-600 border-red-200"
+                      )}>
+                        {req.status}
+                      </span>
+                    </td>
+                    <td className="px-10 py-6 text-right">
+                      {req.status === 'Pending' ? (
+                        <div className="flex items-center justify-end gap-2">
+                           <button 
+                             onClick={() => setLeaveRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'Accepted' } : r))}
+                             className="h-10 px-4 bg-emerald-600 text-white rounded-xl font-black uppercase text-[10px] tracking-widest hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-500/20 active:scale-95"
+                           >
+                             Approve
+                           </button>
+                           <button 
+                             onClick={() => setLeaveRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'Denied' } : r))}
+                             className="h-10 px-4 bg-red-600 text-white rounded-xl font-black uppercase text-[10px] tracking-widest hover:bg-red-700 transition-all shadow-lg shadow-red-500/20 active:scale-95"
+                           >
+                             Deny
+                           </button>
+                        </div>
+                      ) : (
+                        <div className="text-[10px] font-black text-slate-300 uppercase tracking-widest italic">Archived</div>
+                      )}
+                    </td>
+                  </tr>
+                ));
+              })()}
+            </tbody>
+          </table>
+        </div>
+        <div className="p-8 bg-slate-50/50 border-t border-slate-100 flex justify-center">
+           <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest italic">System maintains 90-day retention on historical leave data</p>
+        </div>
+      </div>
+
+      {/* Analytics Form Section */}
+      <div className="pt-20 border-t border-slate-100">
+        <div className="flex items-center gap-6 mb-12">
+           <div className="h-20 w-20 bg-slate-950 rounded-[2.5rem] flex items-center justify-center shadow-2xl">
+              <Sparkles className="h-10 w-10 text-indigo-400" />
+           </div>
+           <div>
+              <h2 className="text-4xl font-black text-slate-900 italic uppercase tracking-tight">Analytics Form</h2>
+              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 mt-1">Cross-Sector Data Verification & Historical Audit</p>
+           </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-10 mb-20">
+           <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+              <p className="text-[11px] font-black uppercase text-slate-400 tracking-widest mb-6">Efficiency Coefficient</p>
+              <div className="flex items-end gap-3 mb-2">
+                 <p className="text-5xl font-black text-slate-900 italic">94.8%</p>
+                 <div className="h-6 px-2 bg-emerald-50 text-emerald-600 text-[10px] font-black rounded-lg flex items-center mb-2">+2.4%</div>
+              </div>
+              <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden mt-4">
+                 <div className="h-full bg-indigo-600 rounded-full" style={{ width: '94.8%' }} />
+              </div>
+           </div>
+           <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+              <p className="text-[11px] font-black uppercase text-slate-400 tracking-widest mb-6">Staff SAT Score</p>
+              <div className="flex items-end gap-3 mb-2">
+                 <p className="text-5xl font-black text-slate-900 italic">4.9</p>
+                 <p className="text-sm font-black text-slate-400 mb-2 uppercase tracking-widest">/ 5.0</p>
+              </div>
+              <div className="flex gap-1.5 mt-4">
+                 {[1,2,3,4,5].map(i => <div key={i} className="h-2 flex-1 bg-amber-400 rounded-full" />)}
+              </div>
+           </div>
+           <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+              <p className="text-[11px] font-black uppercase text-slate-400 tracking-widest mb-6">Deployment Velocity</p>
+              <div className="flex items-end gap-3 mb-2">
+                 <p className="text-5xl font-black text-slate-900 italic">1.2s</p>
+                 <p className="text-sm font-black text-slate-400 mb-2 uppercase tracking-widest">Latency</p>
+              </div>
+              <div className="flex items-center gap-2 mt-4 text-[10px] font-black text-emerald-600 uppercase tracking-widest">
+                 <Zap className="h-3 w-3" /> Real-time Sync Active
+              </div>
+           </div>
+        </div>
+
+        {/* Audit Trail Moved Here */}
+        <div className="bg-slate-950 rounded-[4rem] p-16 text-white shadow-2xl border border-slate-800">
+           <div className="flex items-center justify-between mb-16">
+              <div className="flex items-center gap-6">
+                 <div className="h-16 w-16 bg-white/10 rounded-3xl flex items-center justify-center">
+                    <History className="h-8 w-8 text-indigo-400" />
+                 </div>
+                 <div>
+                    <h3 className="text-3xl font-black italic tracking-tight uppercase">System Audit Trail</h3>
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] mt-1">Full Transaction History Matrix</p>
+                 </div>
+              </div>
+              <button className="px-8 py-4 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-white/10 transition-all flex items-center gap-3">
+                 <Download className="h-4 w-4" /> Export Protocol Logs
+              </button>
+           </div>
+           
+           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">
+              {recentAudit.map((log, i) => (
+                <div key={log.id} className="relative pl-10 before:absolute before:left-0 before:top-2 before:bottom-0 before:w-px before:bg-white/10">
+                   <div className="absolute left-[-4px] top-1.5 h-2 w-2 rounded-full bg-indigo-500 shadow-[0_0_15px_#6366f1]" />
+                   <div className="space-y-3">
+                      <p className="text-sm font-black text-white leading-tight uppercase italic tracking-tight">{log.action}</p>
+                      <p className="text-[11px] text-slate-400 font-medium leading-relaxed">{log.description}</p>
+                      <div className="flex items-center gap-3 mt-4 pt-4 border-t border-white/5">
+                         <div className="px-3 py-1 bg-indigo-500/10 rounded-lg text-[9px] font-black text-indigo-400 uppercase tracking-widest">
+                            {new Date(log.changed_at).toLocaleTimeString()}
+                         </div>
+                         <div className="px-3 py-1 bg-white/5 rounded-lg text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                            SYS-LOG-{log.id.slice(0,4)}
+                         </div>
+                      </div>
+                   </div>
+                </div>
+              ))}
+           </div>
+        </div>
+      </div>
     </div>
   );
 }

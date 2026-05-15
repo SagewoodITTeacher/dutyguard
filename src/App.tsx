@@ -9,6 +9,7 @@ import { TeacherDashboard } from './pages/TeacherDashboard';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { AdminTeachers } from './pages/AdminTeachers';
 import { AdminVenues } from './pages/AdminVenues';
+import { FullScheduleManualEditing } from './pages/FullScheduleManualEditing';
 import { ManagerDashboard } from './pages/ManagerDashboard';
 import { Login } from './pages/Login';
 import React, { useEffect, useState } from 'react';
@@ -227,6 +228,12 @@ export default function App() {
           <Route path="/admin/venues" element={
             <ProtectedRoute allowedRoles={['admin']} userRole={roleInfo?.ui_role}>
               <AdminVenues />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/admin/full-schedule" element={
+            <ProtectedRoute allowedRoles={['admin']} userRole={roleInfo?.ui_role}>
+              <FullScheduleManualEditing />
             </ProtectedRoute>
           } />
         </Route>

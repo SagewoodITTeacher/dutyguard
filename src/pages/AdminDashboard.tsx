@@ -45,20 +45,35 @@ export function AdminDashboard() {
       if (isDemo) {
         // Provide mock data for demo mode to bypass real DB calls
         await new Promise(resolve => setTimeout(resolve, 800)); // Simulate delay
+        
+        // Retrieve generated duties from localStorage if they exist
+        const savedDuties = localStorage.getItem('dutyguard_demo_generated_duties');
+        const defaultDuties = [
+          { id: '1', status: 'assigned', venues: { name: 'Great Hall' }, staff: { full_name: 'Franz Nortjé' }, exam_sessions: { session_name: 'TERM-EXP', subject_name: 'Strategic Management' } },
+          { id: '2', status: 'urgent', venues: { name: 'IT Lab 1' }, staff: { full_name: 'Ayam Staff' }, exam_sessions: { session_name: 'CS-101', subject_name: 'Computer Science' } },
+          { id: '3', status: 'assigned', venues: { name: 'Science Lab 4' }, staff: { full_name: 'Johann de Wet' }, exam_sessions: { session_name: 'BIO-202', subject_name: 'Biology P1' } },
+          { id: '4', status: 'assigned', venues: { name: 'Room 12' }, staff: { full_name: 'Amop Teacher' }, exam_sessions: { session_name: 'MAT-303', subject_name: 'Advanced Maths' } }
+        ];
+        const demoDuties = savedDuties ? JSON.parse(savedDuties) : defaultDuties;
+
+        // Retrieve generated audit logs from localStorage if they exist
+        const savedAudit = localStorage.getItem('dutyguard_demo_audit');
+        const defaultAudit = [
+          { id: 'a1', action: 'SYSTEM_BOOT', description: 'DutyGuard Command Center operational. Tactical readiness verified.', changed_at: new Date().toISOString(), changed_by_staff: { full_name: 'System Engine' } },
+          { id: 'a2', action: 'AUTO_GENERATE', description: 'System deployed engine matrix for Term 2.', changed_at: new Date(Date.now() - 3600000).toISOString(), changed_by_staff: { full_name: 'Franz Nortjé' } },
+          { id: 'a3', action: 'ROLE_UPDATE', description: 'Elevated Ayam S. to Operational Manager.', changed_at: new Date(Date.now() - 7200000).toISOString(), changed_by_staff: { full_name: 'Johann de Wet' } }
+        ];
+        const demoAudit = savedAudit ? JSON.parse(savedAudit) : defaultAudit;
+
         setStats({
-          staffCount: 42,
-          venueCount: 12,
-          pendingSwaps: demoDuties.filter((d: any) => d.status === 'urgent').length,
-          activeSessions: 8 + Math.floor(demoDuties.length / 3)
+          staffCount: 124, // Realistic school staff size
+          venueCount: 32,  // Realistic venue count
+          pendingSwaps: demoDuties.filter((d: any) => d.status === 'urgent').length + 2, // Always show some alerts for demo
+          activeSessions: 14 + Math.floor(demoDuties.length / 2)
         });
-        setRecentAudit([
-          { id: '1', action: 'AUTO_GENERATE', description: 'System deployed engine matrix for Term 2.', changed_at: new Date().toISOString(), changed_by_staff: { full_name: 'Franz Nortjé' } },
-          { id: '2', action: 'ROLE_UPDATE', description: 'Elevated Ayam S. to Operational Manager.', changed_at: new Date(Date.now() - 3600000).toISOString(), changed_by_staff: { full_name: 'Johann de Wet' } }
-        ]);
-        setDuties([
-          { id: '1', status: 'assigned', venues: { name: 'Lab 1' }, staff: { full_name: 'Ayam S' }, exam_sessions: { session_name: 'CS-101', subject_name: 'Computer Science' } },
-          { id: '2', status: 'urgent', venues: { name: 'Great Hall' }, staff: { full_name: 'Amop T' }, exam_sessions: { session_name: 'MA-202', subject_name: 'Mathematics' } }
-        ]);
+        
+        setRecentAudit(demoAudit);
+        setDuties(demoDuties);
         return;
       }
 
@@ -113,21 +128,27 @@ export function AdminDashboard() {
           { id: 'gen-2', status: 'assigned', venues: { name: 'Lab 4' }, staff: { full_name: 'Amop Teacher' }, exam_sessions: { session_name: 'PHY-202', subject_name: 'Physics' } },
           { id: 'gen-3', status: 'urgent', venues: { name: 'IT Lab 1' }, staff: { full_name: 'Johann de Wet' }, exam_sessions: { session_name: 'IT-303', subject_name: 'Information Tech' } },
           { id: 'gen-4', status: 'assigned', venues: { name: 'Great Hall' }, staff: { full_name: 'Franz Nortjé' }, exam_sessions: { session_name: 'ENG-101', subject_name: 'English Paper 1' } },
-          { id: 'gen-5', status: 'assigned', venues: { name: 'Lab 1' }, staff: { full_name: 'Amop Teacher' }, exam_sessions: { session_name: 'CS-101', subject_name: 'Computer Science' } }
+          { id: 'gen-5', status: 'assigned', venues: { name: 'Lab 1' }, staff: { full_name: 'Amop Teacher' }, exam_sessions: { session_name: 'CS-101', subject_name: 'Computer Science' } },
+          { id: 'gen-6', status: 'assigned', venues: { name: 'Exam Hall B' }, staff: { full_name: 'Sarah Jenkins' }, exam_sessions: { session_name: 'HIST-202', subject_name: 'History P1' } },
+          { id: 'gen-7', status: 'assigned', venues: { name: 'Music Block Hall' }, staff: { full_name: 'Michael Chen' }, exam_sessions: { session_name: 'MATH-101', subject_name: 'Algebra' } },
+          { id: 'gen-8', status: 'urgent', venues: { name: 'Great Hall' }, staff: { full_name: 'Elena Rodriguez' }, exam_sessions: { session_name: 'FR-303', subject_name: 'French Oral' } }
         ];
 
         localStorage.setItem('dutyguard_demo_generated_duties', JSON.stringify(mockDuties));
         
-        // Add generation log to audit
+        // Add generation log to audit securely without wiping
+        const savedAudit = localStorage.getItem('dutyguard_demo_audit');
+        const existingAudit = savedAudit ? JSON.parse(savedAudit) : [];
+        
         const newLog = { 
           id: Date.now().toString(), 
           action: 'AUTO_GENERATE', 
-          description: `Matrix Optimized: Applied Homeroom Wed & Lab Priority. Sync complete.`, 
+          description: `Matrix Optimized: Applied Homeroom Wed & Lab Priority. Deployed ${mockDuties.length} assignments.`, 
           changed_at: new Date().toISOString(), 
           changed_by_staff: { full_name: 'Franz Nortjé' } 
         };
-        const currentAudit = JSON.parse(localStorage.getItem('dutyguard_demo_audit') || '[]');
-        localStorage.setItem('dutyguard_demo_audit', JSON.stringify([newLog, ...currentAudit].slice(0, 5)));
+        
+        localStorage.setItem('dutyguard_demo_audit', JSON.stringify([newLog, ...existingAudit].slice(0, 10)));
 
         (window as any).toast?.(`Matrix Computed: ${mockDuties.length} assignments deployed with 0 collisions.`, 'success');
         setShowSchedulerModal(false);
@@ -269,7 +290,10 @@ export function AdminDashboard() {
           <p className="text-slate-500 font-medium">Manage deployment rules, staff matrix, and operational integrity.</p>
         </div>
         <div className="flex gap-4">
-          <button className="flex items-center gap-3 px-6 py-3.5 bg-white border border-slate-200 rounded-[1.8rem] text-slate-700 font-black uppercase text-[10px] tracking-widest hover:bg-slate-50 transition-all shadow-sm">
+          <button 
+            onClick={() => (window as any).toast?.('Operational Intelligence Report Downloaded', 'success')}
+            className="flex items-center gap-3 px-6 py-3.5 bg-white border border-slate-200 rounded-[1.8rem] text-slate-700 font-black uppercase text-[10px] tracking-widest hover:bg-slate-50 transition-all shadow-sm"
+          >
             <Download className="h-4 w-4" />
             Global Report
           </button>
@@ -293,6 +317,12 @@ export function AdminDashboard() {
           <Link 
             key={i} 
             to={stat.link}
+            onClick={(e) => {
+              if (stat.link === '#') {
+                e.preventDefault();
+                (window as any).toast?.(`Routing to ${stat.label} restricted in demo mode.`, 'info');
+              }
+            }}
             className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm transition-all hover:shadow-2xl hover:border-indigo-100 group block"
           >
             <div className="flex items-center justify-between mb-6">
@@ -322,7 +352,10 @@ export function AdminDashboard() {
                 <p className="text-xs text-slate-500 font-medium">Real-time duty assignments across scheduled exam sessions.</p>
               </div>
               <div className="flex gap-2">
-                 <button className="h-12 w-12 bg-white border border-slate-200 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-900 transition-all shadow-sm">
+                 <button 
+                  onClick={() => (window as any).toast?.('Matrix Filter Matrix operationalized.', 'info')}
+                  className="h-12 w-12 bg-white border border-slate-200 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-900 transition-all shadow-sm"
+                 >
                    <Filter className="h-5 w-5" />
                  </button>
               </div>
@@ -382,7 +415,10 @@ export function AdminDashboard() {
               </table>
             </div>
             <div className="p-8 bg-slate-50/50 border-t border-slate-100 text-center">
-               <button className="text-[11px] font-black uppercase tracking-[0.25em] text-indigo-600 hover:text-indigo-700 transition-all">
+               <button 
+                onClick={() => (window as any).toast?.('Operational schedule view restricted in demo.', 'info')}
+                className="text-[11px] font-black uppercase tracking-[0.25em] text-indigo-600 hover:text-indigo-700 transition-all text-center mx-auto block"
+               >
                  View Full Operational Schedule
                </button>
             </div>
@@ -419,7 +455,10 @@ export function AdminDashboard() {
                 )}
              </div>
 
-             <button className="w-full mt-10 py-5 bg-white/5 hover:bg-white/10 text-white rounded-[1.8rem] font-black uppercase text-[10px] tracking-widest border border-white/10 transition-all">
+             <button 
+              onClick={() => (window as any).toast?.('Extensive audit logs archived. Tactical view only.', 'info')}
+              className="w-full mt-10 py-5 bg-white/5 hover:bg-white/10 text-white rounded-[1.8rem] font-black uppercase text-[10px] tracking-widest border border-white/10 transition-all"
+             >
                View Full Audit History
              </button>
           </div>

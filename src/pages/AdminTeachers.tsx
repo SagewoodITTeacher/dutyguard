@@ -30,7 +30,15 @@ export function AdminTeachers() {
           { id: '1', full_name: 'Franz Nortjé', staff_code: 'FRAN', email: 'nortje.f@school.edu', department: 'Management' },
           { id: '2', full_name: 'Johann de Wet', staff_code: 'JOHD', email: 'johand.d@school.edu', department: 'Operations' },
           { id: '3', full_name: 'Ayam Staff', staff_code: 'AYAM', email: 'ayam@school.edu', department: 'Science' },
-          { id: '4', full_name: 'Amop Teacher', staff_code: 'AMOP', email: 'amop@school.edu', department: 'IT' }
+          { id: '4', full_name: 'Amop Teacher', staff_code: 'AMOP', email: 'amop@school.edu', department: 'IT' },
+          { id: '5', full_name: 'Sarah Jenkins', staff_code: 'SJEN', email: 'jenkins.s@school.edu', department: 'English' },
+          { id: '6', full_name: 'Michael Chen', staff_code: 'MCHE', email: 'chen.m@school.edu', department: 'Mathematics' },
+          { id: '7', full_name: 'Elena Rodriguez', staff_code: 'EROD', email: 'rod.e@school.edu', department: 'Languages' },
+          { id: '8', full_name: 'David Smith', staff_code: 'DSMI', email: 'smith.d@school.edu', department: 'Physical Education' },
+          { id: '9', full_name: 'Linda Mbeki', staff_code: 'LMBE', email: 'mbeki.l@school.edu', department: 'Social Sciences' },
+          { id: '10', full_name: 'Robert Wilson', staff_code: 'RWIL', email: 'wilson.r@school.edu', department: 'Creative Arts' },
+          { id: '11', full_name: 'Grace Hopper', staff_code: 'GHOP', email: 'hopper.g@school.edu', department: 'Computer Science' },
+          { id: '12', full_name: 'Alan Turing', staff_code: 'ATUR', email: 'turing.a@school.edu', department: 'Mathematics' }
         ]);
         return;
       }

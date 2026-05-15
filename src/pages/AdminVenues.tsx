@@ -30,7 +30,15 @@ export function AdminVenues() {
           { id: 'v1', name: 'Great Hall', type: 'Hall', capacity: 350 },
           { id: 'v2', name: 'IT Lab 1', type: 'Lab', capacity: 40 },
           { id: 'v3', name: 'Science Lab 4', type: 'Lab', capacity: 35 },
-          { id: 'v4', name: 'Sports Pavilion', type: 'Hall', capacity: 150 }
+          { id: 'v4', name: 'Sports Pavilion', type: 'Hall', capacity: 150 },
+          { id: 'v5', name: 'Room 12', type: 'Classroom', capacity: 30 },
+          { id: 'v6', name: 'Room 15', type: 'Classroom', capacity: 30 },
+          { id: 'v7', name: 'Art Studio', type: 'Specialist', capacity: 25 },
+          { id: 'v8', name: 'Library Annex', type: 'Specialist', capacity: 60 },
+          { id: 'v9', name: 'Music Block Hall', type: 'Hall', capacity: 80 },
+          { id: 'v10', name: 'Tech Lab 2', type: 'Lab', capacity: 35 },
+          { id: 'v11', name: 'Bio Lab 1', type: 'Lab', capacity: 30 },
+          { id: 'v12', name: 'Exam Hall B', type: 'Hall', capacity: 200 }
         ]);
         return;
       }

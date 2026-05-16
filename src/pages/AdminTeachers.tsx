@@ -966,6 +966,7 @@ export function AdminTeachers() {
             onClose={() => setActiveModal(null)} 
             title="Teaching Timetable" 
             subtitle={`${selectedStaff.first_name} ${selectedStaff.last_name} (${selectedStaff.staff_code})`}
+            maxWidth="max-w-4xl"
           >
             <div className="space-y-8">
               <div className="flex bg-slate-100 p-1.5 rounded-2xl">
@@ -1018,19 +1019,39 @@ export function AdminTeachers() {
                           <td className="p-4 font-black text-slate-400 text-sm whitespace-nowrap uppercase italic tracking-tighter">P{p}</td>
                           {[0, 1, 2, 3, 4].map(d => {
                             const slot = timetable.find(t => t.day_of_cycle === d && t.period === p && t.cycle === activeCycle);
+                            
+                            // Determine cell style based on class_code value
+                            let cellStyle = "bg-purple-50 text-purple-400 border-purple-100 shadow-sm shadow-purple-100/30"; // Default: Purple
+                            
+                            if (slot && slot.class_code) {
+                              const code = slot.class_code.toString().trim();
+                              if (code.startsWith('12')) {
+                                cellStyle = "bg-fuchsia-50 text-fuchsia-600 border-fuchsia-200 shadow-sm shadow-fuchsia-100/50 hover:bg-fuchsia-100";
+                              } else if (code.startsWith('11')) {
+                                cellStyle = "bg-orange-50 text-orange-600 border-orange-200 shadow-sm shadow-orange-100/50 hover:bg-orange-100";
+                              } else if (code.startsWith('10')) {
+                                cellStyle = "bg-teal-50 text-teal-600 border-teal-200 shadow-sm shadow-teal-100/50 hover:bg-teal-100";
+                              } else if (code.startsWith('9')) {
+                                cellStyle = "bg-lime-50 text-emerald-700 border-lime-200 shadow-sm shadow-lime-100/50 hover:bg-lime-100";
+                              } else if (code.startsWith('8')) {
+                                cellStyle = "bg-yellow-50 text-yellow-700 border-yellow-300 shadow-sm shadow-yellow-100/50 hover:bg-yellow-100";
+                              } else {
+                                // Fallback for other codes if any
+                                cellStyle = "bg-indigo-50 text-indigo-600 border-indigo-100 shadow-sm shadow-indigo-100/50 hover:bg-indigo-100";
+                              }
+                            }
+
                             return (
-                              <td key={d} className="p-2 border-l border-slate-50 min-w-[120px]">
+                              <td key={d} className="p-2 border-l border-slate-50 min-w-[140px]">
                                 <motion.div 
-                                  initial={slot ? { opacity: 0, scale: 0.9 } : {}}
+                                  initial={slot ? { opacity: 0, scale: 0.95 } : {}}
                                   animate={slot ? { opacity: 1, scale: 1 } : {}}
                                   className={cn(
-                                    "text-center font-black text-[11px] py-4 rounded-xl transition-all uppercase tracking-tight italic",
-                                    slot 
-                                      ? "bg-indigo-50 text-indigo-600 border border-indigo-100 shadow-sm shadow-indigo-100/50" 
-                                      : "bg-white/50 text-slate-200"
+                                    "text-center font-black text-[11px] py-4 rounded-xl transition-all uppercase tracking-tight italic border",
+                                    cellStyle
                                   )}
                                 >
-                                  {slot ? slot.class_code : '---'}
+                                  {slot ? slot.class_code : 'FREE'}
                                 </motion.div>
                               </td>
                             );
@@ -1050,7 +1071,7 @@ export function AdminTeachers() {
   );
 }
 
-function Modal({ isOpen, onClose, title, subtitle, children, footer }: { isOpen: boolean, onClose: () => void, title: string, subtitle?: string, children: React.ReactNode, footer?: React.ReactNode }) {
+function Modal({ isOpen, onClose, title, subtitle, children, footer, maxWidth = "max-w-2xl" }: { isOpen: boolean, onClose: () => void, title: string, subtitle?: string, children: React.ReactNode, footer?: React.ReactNode, maxWidth?: string }) {
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-xl">
@@ -1058,7 +1079,7 @@ function Modal({ isOpen, onClose, title, subtitle, children, footer }: { isOpen:
          initial={{ scale: 0.9, opacity: 0, y: 50 }} 
          animate={{ scale: 1, opacity: 1, y: 0 }} 
          exit={{ scale: 0.9, opacity: 0, y: 50 }} 
-         className="relative w-full max-w-2xl bg-white rounded-[4rem] overflow-hidden shadow-2xl"
+         className={cn("relative w-full bg-white rounded-[4rem] overflow-hidden shadow-2xl", maxWidth)}
        >
           <div className="p-10 bg-indigo-600 text-white flex justify-between items-center">
              <div className="flex items-center gap-6">

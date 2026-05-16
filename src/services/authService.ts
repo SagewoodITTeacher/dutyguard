@@ -1,46 +1,46 @@
 import { supabase } from '../lib/supabase';
 
 export interface UserRoleInfo {
-  user_id: string;
+  staff_code: string;
   email: string;
   full_name: string;
   ui_role: 'teacher' | 'manager' | 'admin';
   locked: boolean;
-  staff_code: string;
+  user_id?: string; // Kept for compatibility if needed elsewhere
 }
 
 export const DEMO_USERS: Record<string, UserRoleInfo> = {
   'FRAN': {
-    user_id: 'demo-fran-uid',
+    staff_code: 'FRAN',
     email: 'nortje.f@school.edu',
     full_name: 'Franz Nortjé',
     ui_role: 'admin',
     locked: true,
-    staff_code: 'FRAN'
+    user_id: 'demo-fran-uid'
   },
   'JOHD': {
-    user_id: 'demo-johd-uid',
+    staff_code: 'JOHD',
     email: 'johand.d@school.edu',
     full_name: 'Johann de Wet',
     ui_role: 'admin',
     locked: true,
-    staff_code: 'JOHD'
+    user_id: 'demo-johd-uid'
   },
   'AYAM': {
-    user_id: 'demo-ayam-uid',
+    staff_code: 'AYAM',
     email: 'ayam@school.edu',
     full_name: 'Ayam Staff',
     ui_role: 'teacher',
     locked: false,
-    staff_code: 'AYAM'
+    user_id: 'demo-ayam-uid'
   },
   'AMOP': {
-    user_id: 'demo-amop-uid',
+    staff_code: 'AMOP',
     email: 'amop@school.edu',
     full_name: 'Amop Teacher',
     ui_role: 'teacher',
     locked: false,
-    staff_code: 'AMOP'
+    user_id: 'demo-amop-uid'
   }
 };
 
@@ -74,11 +74,22 @@ export async function getUserRoleInfo(userId: string): Promise<UserRoleInfo | nu
     };
   }
 
-  const { data, error } = await supabase
+  // Get user details from auth to get email
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user || (!user.email && !userId)) return null;
+
+  const query = supabase
     .from('vw_user_roles')
-    .select('*')
-    .eq('user_id', userId)
-    .single();
+    .select('*');
+
+  if (user.email) {
+    query.eq('email', user.email);
+  } else {
+    // Fallback if no email, though unlikely in this system
+    return null;
+  }
+
+  const { data, error } = await query.single();
 
   if (error || !data) {
     console.error('Error fetching user role info:', error);
@@ -138,9 +149,14 @@ export async function updateUserRole(staffCode: string, newRole: 'teacher' | 'ma
   }
 
   // Real DB update
+  const updateData: any = {};
+  if (newRole === 'admin') updateData.accessToAdminUI = true;
+  if (newRole === 'manager') updateData.accessToManagerUI = true;
+  if (newRole === 'teacher') updateData.accessToTeacherUI = true;
+
   const { error } = await supabase
     .from('useraccountroles')
-    .update({ role: newRole })
+    .update(updateData)
     .eq('staff_code', staffCode);
 
   if (error) {

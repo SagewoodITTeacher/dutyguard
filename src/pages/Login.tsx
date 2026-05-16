@@ -8,7 +8,37 @@ export function Login() {
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [magicLinkSent, setMagicLinkSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleMagicLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email) {
+      setError('Please enter your email address');
+      return;
+    }
+    
+    setLoading(true);
+    setError(null);
+    setMagicLinkSent(false);
+
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: window.location.origin,
+        },
+      });
+
+      if (error) throw error;
+      
+      setMagicLinkSent(true);
+      setLoading(false);
+    } catch (err: any) {
+      setError(err.message || 'Failed to send magic link');
+      setLoading(false);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -120,18 +150,41 @@ export function Login() {
               </div>
             )}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-6 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black uppercase tracking-[0.2em] text-[11px] shadow-2xl shadow-indigo-600/20 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-3 group"
-            >
-              {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : (
-                <>
-                  Deploy Interface
-                  <Shield className="h-4 w-4 group-hover:rotate-12 transition-transform" />
-                </>
-              )}
-            </button>
+            {magicLinkSent && (
+              <div className="p-5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-500 text-xs font-black uppercase tracking-tight text-center flex flex-col items-center gap-2">
+                <CheckCircle2 className="h-5 w-5" />
+                Magic link sent! Check your school email.
+              </div>
+            )}
+
+            <div className="flex flex-col gap-4">
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-6 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black uppercase tracking-[0.2em] text-[11px] shadow-2xl shadow-indigo-600/20 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-3 group"
+              >
+                {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : (
+                  <>
+                    Deploy Interface
+                    <Shield className="h-4 w-4 group-hover:rotate-12 transition-transform" />
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleMagicLink}
+                disabled={loading}
+                className="w-full py-5 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white rounded-[1.8rem] border border-slate-800 font-black uppercase tracking-widest text-[10px] transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : (
+                  <>
+                    Request Magic Link
+                    <Mail className="h-3 w-3" />
+                  </>
+                )}
+              </button>
+            </div>
           </form>
 
           <div className="mt-12 pt-10 border-t border-slate-800">

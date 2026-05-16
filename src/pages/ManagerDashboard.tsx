@@ -89,15 +89,15 @@ export function ManagerDashboard() {
       // 2. Get staff already assigned to this session
       const { data: assignedDuties, error: dutiesError } = await supabase
         .from('exam_duties')
-        .select('staff_id')
-        .eq('session_id', sessionId);
+        .select('staff_code')
+        .eq('exam_session_id', parseInt(sessionId));
 
       if (dutiesError) throw dutiesError;
 
-      const assignedStaffIds = assignedDuties?.map(d => d.staff_id) || [];
+      const assignedStaffIds = assignedDuties?.map(d => d.staff_code) || [];
       
       // 3. Filter out assigned staff
-      const available = (allStaff || []).filter(s => !assignedStaffIds.includes(s.id));
+      const available = (allStaff || []).filter(s => !assignedStaffIds.includes(s.staff_code));
       setAvailableStaff(available);
     } catch (err) {
       console.error('Error fetching available staff:', err);
@@ -107,7 +107,7 @@ export function ManagerDashboard() {
   }
 
   const handleReliefClick = (alert: any) => {
-    const sessionId = alert.session_id || alert.duty?.session_id;
+    const sessionId = alert.exam_session_id || alert.duty?.exam_session_id;
     if (!sessionId) {
       (window as any).toast?.('Cannot identify session for relief', 'error');
       return;
@@ -116,22 +116,22 @@ export function ManagerDashboard() {
     fetchAvailableStaff(sessionId);
   };
 
-  const assignRelief = async (staffId: string) => {
+  const assignRelief = async (staffCode: string) => {
     try {
       if (!selectedAlert) return;
-      const sessionId = selectedAlert.session_id || selectedAlert.duty?.session_id;
+      const sessionId = selectedAlert.exam_session_id || selectedAlert.duty?.exam_session_id;
       const venueId = selectedAlert.duty?.venue_id;
 
       // 1. Create new duty for relief teacher
       const { error: dutyError } = await supabase
         .from('exam_duties')
         .insert({
-          session_id: sessionId,
-          staff_id: staffId,
+          exam_session_id: sessionId,
+          staff_code: staffCode,
           venue_id: venueId || '', // Defaulting to same venue if help request
-          role: 'invigilator',
+          duty_type: 'invigilator',
           status: 'assigned'
-        });
+        } as any);
 
       if (dutyError) throw dutyError;
 
@@ -286,10 +286,10 @@ export function ManagerDashboard() {
 
   // Transform views into chart data
   const chartData = workloadData.map(w => ({
-    name: w.full_name?.split(' ').map((n, i, arr) => i === arr.length - 1 ? n : n[0] + '.').join(' '),
+    name: w.teacher_name?.split(' ').map((n: string, i: number, arr: string[]) => i === arr.length - 1 ? n : n[0] + '.').join(' '),
     invigilation: w.invigilation_count || 0,
     standby: w.standby_count || 0,
-    tech: w.tech_duty_count || 0,
+    tech: w.tech_count || 0,
     total: w.total_duties || 0
   }));
 
@@ -489,20 +489,20 @@ export function ManagerDashboard() {
                    <div className="grid grid-cols-1 gap-4">
                       {availableStaff.map((staff) => (
                         <motion.button
-                          key={staff.id}
+                          key={staff.staff_code}
                           whileHover={{ x: 10 }}
-                          onClick={() => assignRelief(staff.id)}
+                          onClick={() => assignRelief(staff.staff_code)}
                           className="flex items-center justify-between p-6 bg-slate-50 rounded-[2rem] border border-slate-100 hover:bg-white hover:border-indigo-100 hover:shadow-xl transition-all group"
                         >
                            <div className="flex items-center gap-6">
                               <div className="h-14 w-14 bg-white rounded-2xl border border-slate-100 flex items-center justify-center shadow-sm group-hover:bg-indigo-50 group-hover:border-indigo-100 transition-colors">
                                  <span className="text-base font-black text-indigo-600 italic">
-                                   {staff.full_name.split(' ').map((n: string) => n[0]).join('')}
+                                   {staff.first_name?.[0]}{staff.last_name?.[0]}
                                  </span>
                               </div>
                               <div className="text-left">
-                                 <p className="text-lg font-black text-slate-900 tracking-tight italic uppercase">{staff.full_name}</p>
-                                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{staff.department || 'General Staff'}</p>
+                                 <p className="text-lg font-black text-slate-900 tracking-tight italic uppercase">{staff.first_name} {staff.last_name}</p>
+                                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{staff.role || 'General Staff'}</p>
                               </div>
                            </div>
                            <div className="flex items-center gap-4">

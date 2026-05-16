@@ -20,16 +20,17 @@ export class SchedulerService {
     
     // 1. Fetch data
     const { data: staff } = await supabase.from('staff').select('*');
-    const { data: session } = await supabase.from('exam_sessions').select('*').eq('id', sessionId).single();
-    const { data: leaves } = await supabase.from('staff_leaves').select('*').eq('session_id', sessionId);
+    const { data: session } = await supabase.from('exam_sessions').select('*').eq('id', parseInt(sessionId)).single();
     
     if (!staff || !session) throw new Error("Missing data for generation");
 
-    const unavailableStaffIds = new Set(leaves?.map(l => l.staff_id) || []);
-    const availableStaff = staff.filter(s => !unavailableStaffIds.has(s.id));
+    const { data: leaves } = await supabase.from('staff_leaves').select('*').eq('leave_date', session.exam_date);
+    
+    const unavailableStaffIds = new Set(leaves?.map(l => l.staff_code) || []);
+    const availableStaff = staff.filter(s => !unavailableStaffIds.has(s.staff_code));
 
     // 2. Filter for Wednesday Homeroom rule
-    const isWednesday = new Date(session.date).getDay() === 3;
+    const isWednesday = new Date(session.exam_date).getDay() === 3;
     
     // 3. Logic for assigning (Simplified)
     // - Sort staff by current load (least duties first)
@@ -38,7 +39,7 @@ export class SchedulerService {
     
     return {
       message: "Logic blueprint ready. Rule engine initialized.",
-      sessionDate: session.date,
+      sessionDate: session.exam_date,
       isWednesday,
       availableStaffCount: availableStaff.length
     };

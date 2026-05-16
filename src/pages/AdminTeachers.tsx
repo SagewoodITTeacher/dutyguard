@@ -19,8 +19,9 @@ export function AdminTeachers() {
 
   // Modal States
   const [roleValue, setRoleValue] = useState('');
-  const [subjects, setSubjects] = useState<string[]>([]);
+  const [subjects, setSubjects] = useState<any[]>([]);
   const [newSubject, setNewSubject] = useState('');
+  const [allSubjects, setAllSubjects] = useState<any[]>([]); // To populate a dropdown for adding
   const [leaveData, setLeaveData] = useState({
     date: '',
     isFullDay: true,
@@ -28,42 +29,28 @@ export function AdminTeachers() {
     endTime: '14:30',
     reason: ''
   });
-  const [timetable, setTimetable] = useState<Record<string, string>>({});
+  const [staffLeaves, setStaffLeaves] = useState<any[]>([]);
+  const [timetable, setTimetable] = useState<any[]>([]);
   const [activeCycle, setActiveCycle] = useState('Cycle 1');
 
   useEffect(() => {
     fetchStaff();
+    fetchAllSubjects();
   }, []);
 
-  async function fetchStaff() {
-    const isDemo = !!localStorage.getItem('dutyguard_demo_session');
+  async function fetchAllSubjects() {
+    const { data } = await supabase.from('subjects').select('*').order('subject_name');
+    setAllSubjects(data || []);
+  }
 
+  async function fetchStaff() {
     try {
       setLoading(true);
       
-      if (isDemo) {
-        await new Promise(resolve => setTimeout(resolve, 800)); // Simulate delay
-        setStaff([
-          { id: '1', full_name: 'Franz Nortjé', staff_code: 'FRAN', email: 'nortje.f@school.edu', department: 'Management', role: 'ADMIN' },
-          { id: '2', full_name: 'Johann de Wet', staff_code: 'JOHD', email: 'johand.d@school.edu', department: 'Operations', role: 'OPS' },
-          { id: '3', full_name: 'Ayam Staff', staff_code: 'AYAM', email: 'ayam@school.edu', department: 'Science', role: 'Scattered' },
-          { id: '4', full_name: 'Amop Teacher', staff_code: 'AMOP', email: 'amop@school.edu', department: 'IT', role: 'Marathon' },
-          { id: '5', full_name: 'Sarah Jenkins', staff_code: 'SJEN', email: 'jenkins.s@school.edu', department: 'English', role: 'Scattered' },
-          { id: '6', full_name: 'Michael Chen', staff_code: 'MCHE', email: 'chen.m@school.edu', department: 'Mathematics', role: 'Marathon' },
-          { id: '7', full_name: 'Elena Rodriguez', staff_code: 'EROD', email: 'rod.e@school.edu', department: 'Languages', role: 'Scattered' },
-          { id: '8', full_name: 'David Smith', staff_code: 'DSMI', email: 'smith.d@school.edu', department: 'Physical Education', role: 'OPS' },
-          { id: '9', full_name: 'Linda Mbeki', staff_code: 'LMBE', email: 'mbeki.l@school.edu', department: 'Social Sciences', role: 'Scattered' },
-          { id: '10', full_name: 'Robert Wilson', staff_code: 'RWIL', email: 'wilson.r@school.edu', department: 'Creative Arts', role: 'Marathon' },
-          { id: '11', full_name: 'Grace Hopper', staff_code: 'GHOP', email: 'hopper.g@school.edu', department: 'Computer Science', role: 'ADMIN' },
-          { id: '12', full_name: 'Alan Turing', staff_code: 'ATUR', email: 'turing.a@school.edu', department: 'Mathematics', role: 'Scattered' }
-        ]);
-        return;
-      }
-
       const { data, error } = await supabase
         .from('staff')
         .select('*')
-        .order('full_name');
+        .order('last_name');
       
       if (error) throw error;
       setStaff(data || []);
@@ -74,11 +61,63 @@ export function AdminTeachers() {
     }
   }
 
-  const filteredStaff = staff.filter(s => 
-    s.full_name.toLowerCase().includes(search.toLowerCase()) ||
-    s.staff_code?.toLowerCase().includes(search.toLowerCase()) ||
-    s.department?.toLowerCase().includes(search.toLowerCase())
-  );
+  const fetchStaffSubjects = async (staffCode: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('teacher_subjects')
+        .select(`
+          subject_code,
+          subjects (
+            subject_name
+          )
+        `)
+        .eq('staff_code', staffCode);
+      
+      if (error) throw error;
+      setSubjects(data || []);
+    } catch (err) {
+      console.error('Error fetching subjects:', err);
+    }
+  };
+
+  const fetchStaffLeaves = async (staffCode: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('staff_leaves')
+        .select('*')
+        .eq('staff_code', staffCode)
+        .order('leave_date', { ascending: false });
+      
+      if (error) throw error;
+      setStaffLeaves(data || []);
+    } catch (err) {
+      console.error('Error fetching leaves:', err);
+    }
+  };
+
+  const fetchStaffTimetable = async (staffCode: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('teaching_timetable')
+        .select('*')
+        .eq('staff_code', staffCode)
+        .order('day_of_cycle')
+        .order('period');
+      
+      if (error) throw error;
+      setTimetable(data || []);
+    } catch (err) {
+      console.error('Error fetching timetable:', err);
+    }
+  };
+
+  const filteredStaff = staff.filter(s => {
+    const fullName = `${s.first_name} ${s.last_name}`.toLowerCase();
+    const searchLow = search.toLowerCase();
+    return fullName.includes(searchLow) ||
+           s.staff_code?.toLowerCase().includes(searchLow) ||
+           s.role?.toLowerCase().includes(searchLow);
+  });
 
   if (loading) {
      return (
@@ -105,7 +144,7 @@ export function AdminTeachers() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
          {[
-           { label: 'Avg Duty Load', val: '64.2%', icon: TrendingUp },
+           { label: 'Avg Duty Load', val: staff.length > 0 ? (staff.reduce((acc, s) => acc + (s.load_percentage ?? 100), 0) / staff.length).toFixed(1) + '%' : '0.0%', icon: TrendingUp },
            { label: 'Total Personnel', val: staff.length.toString(), icon: Users },
            { label: 'Dept Variance', val: '0.12', icon: Shield },
            { label: 'Audit Compliance', val: '100%', icon: Award },
@@ -152,7 +191,7 @@ export function AdminTeachers() {
           </thead>
           <tbody className="divide-y divide-slate-50">
             {filteredStaff.map((person) => (
-              <tr key={person.id} className="group hover:bg-indigo-50/30 transition-colors">
+              <tr key={person.staff_code} className="group hover:bg-indigo-50/30 transition-colors">
                 <td className="px-10 py-7">
                    <div className="h-14 w-14 bg-white rounded-2xl border border-slate-100 flex items-center justify-center text-indigo-600 font-black text-xs shadow-sm transition-transform group-hover:scale-110 group-hover:border-indigo-200 italic">
                       {person.staff_code}
@@ -160,39 +199,39 @@ export function AdminTeachers() {
                 </td>
                 <td className="px-10 py-7">
                    <div className="flex flex-col">
-                     <span className="font-black text-slate-900 text-lg tracking-tight italic uppercase">{person.full_name}</span>
-                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{person.email}</span>
+                     <span className="font-black text-slate-900 text-lg tracking-tight italic uppercase">{person.first_name} {person.last_name}</span>
+                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{person.staff_code}@school.edu</span>
                    </div>
                 </td>
                 <td className="px-6 py-7">
                   <div className="flex flex-col gap-1">
                     <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-100 text-slate-600 text-[10px] font-black uppercase tracking-widest border border-slate-200/50 italic w-fit">
                       <Shield className="h-3 w-3 text-indigo-400" />
-                      {person.department || 'General'}
+                      {person.role || 'General'}
                     </span>
                     <span className="text-[9px] font-black text-indigo-500 uppercase tracking-widest ml-4 italic">
-                      Role: {person.role || 'Scattered'}
+                      Load: {person.load_percentage ?? 100}%
                     </span>
                   </div>
                 </td>
                 <td className="px-6 py-7">
                    <div className="flex items-center gap-3">
                       <button 
-                        onClick={() => { setSelectedStaff(person); setActiveModal('subjects'); setSubjects(['Mathematics', 'Science']); }}
+                        onClick={() => { setSelectedStaff(person); setActiveModal('subjects'); fetchStaffSubjects(person.staff_code); }}
                         className="h-10 w-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:border-emerald-100 transition-all hover:bg-emerald-50"
                         title="Subjects"
                       >
                          <BookOpen className="h-4 w-4" />
                       </button>
                       <button 
-                        onClick={() => { setSelectedStaff(person); setActiveModal('leave'); }}
+                        onClick={() => { setSelectedStaff(person); setActiveModal('leave'); fetchStaffLeaves(person.staff_code); }}
                         className="h-10 w-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 hover:text-orange-600 hover:border-orange-100 transition-all hover:bg-orange-50"
                         title="Leave"
                       >
                          <CalendarX className="h-4 w-4" />
                       </button>
                       <button 
-                         onClick={() => { setSelectedStaff(person); setActiveModal('timetable'); }}
+                         onClick={() => { setSelectedStaff(person); setActiveModal('timetable'); fetchStaffTimetable(person.staff_code); }}
                          className="h-10 w-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:border-indigo-100 transition-all hover:bg-indigo-50"
                          title="Timetable"
                       >
@@ -226,7 +265,7 @@ export function AdminTeachers() {
           <Modal 
             isOpen={true} 
             onClose={() => setActiveModal(null)} 
-            title={selectedStaff.full_name} 
+            title={`${selectedStaff.first_name} ${selectedStaff.last_name}`} 
             subtitle={selectedStaff.staff_code}
             footer={
               <div className="flex gap-4">
@@ -237,9 +276,16 @@ export function AdminTeachers() {
                   <X className="h-4 w-4" /> Cancel
                 </button>
                 <button 
-                  onClick={() => {
-                    setStaff(prev => prev.map(s => s.id === selectedStaff.id ? { ...s, role: roleValue } : s));
-                    setActiveModal(null);
+                  onClick={async () => {
+                    const { error } = await supabase
+                      .from('staff')
+                      .update({ role: roleValue })
+                      .eq('staff_code', selectedStaff.staff_code);
+                    
+                    if (!error) {
+                      setStaff(prev => prev.map(s => s.staff_code === selectedStaff.staff_code ? { ...s, role: roleValue } : s));
+                      setActiveModal(null);
+                    }
                   }}
                   className="flex-1 py-4 bg-emerald-600 text-white rounded-2xl font-black uppercase text-[11px] tracking-widest hover:bg-emerald-700 shadow-xl shadow-emerald-200 transition-all flex items-center justify-center gap-2"
                 >
@@ -271,19 +317,33 @@ export function AdminTeachers() {
             isOpen={true} 
             onClose={() => setActiveModal(null)} 
             title="Assigned Subjects" 
-            subtitle={`${selectedStaff.full_name} (${selectedStaff.staff_code})`}
+            subtitle={`${selectedStaff.first_name} ${selectedStaff.last_name} (${selectedStaff.staff_code})`}
           >
             <div className="space-y-8">
               <div className="flex gap-4">
-                <input 
-                  type="text" 
+                <select 
                   value={newSubject}
                   onChange={(e) => setNewSubject(e.target.value)}
-                  placeholder="Enter new subject name..."
                   className="flex-1 h-14 px-6 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold"
-                />
+                >
+                  <option value="">Select subject...</option>
+                  {allSubjects.map(s => (
+                    <option key={s.subject_code} value={s.subject_code}>{s.subject_name}</option>
+                  ))}
+                </select>
                 <button 
-                  onClick={() => { if (newSubject) { setSubjects([...subjects, newSubject]); setNewSubject(''); } }}
+                  onClick={async () => { 
+                    if (newSubject) { 
+                      const { error } = await supabase
+                        .from('teacher_subjects')
+                        .insert({ staff_code: selectedStaff.staff_code, subject_code: newSubject });
+                      
+                      if (!error) {
+                        fetchStaffSubjects(selectedStaff.staff_code);
+                        setNewSubject('');
+                      }
+                    } 
+                  }}
                   className="h-14 px-6 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-indigo-700 transition-all flex items-center gap-2"
                 >
                   <Plus className="h-4 w-4" /> Add
@@ -293,15 +353,26 @@ export function AdminTeachers() {
               <div className="space-y-3">
                 {subjects.map((sub, idx) => (
                   <div key={idx} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 group">
-                    <span className="font-bold text-slate-700 uppercase tracking-tight">{sub}</span>
+                    <span className="font-bold text-slate-700 uppercase tracking-tight">{(sub.subjects as any)?.subject_name || sub.subject_code}</span>
                     <button 
-                      onClick={() => setSubjects(subjects.filter((_, i) => i !== idx))}
+                      onClick={async () => {
+                        const { error } = await supabase
+                          .from('teacher_subjects')
+                          .delete()
+                          .eq('staff_code', selectedStaff.staff_code)
+                          .eq('subject_code', sub.subject_code);
+                        
+                        if (!error) {
+                          fetchStaffSubjects(selectedStaff.staff_code);
+                        }
+                      }}
                       className="h-10 w-10 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl flex items-center justify-center transition-all opacity-0 group-hover:opacity-100"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
                 ))}
+                {subjects.length === 0 && <p className="text-center text-slate-400 italic">No subjects assigned</p>}
               </div>
             </div>
           </Modal>
@@ -311,8 +382,8 @@ export function AdminTeachers() {
           <Modal 
             isOpen={true} 
             onClose={() => setActiveModal(null)} 
-            title="Leave Request" 
-            subtitle={`${selectedStaff.full_name} (${selectedStaff.staff_code})`}
+            title="Leave Management" 
+            subtitle={`${selectedStaff.first_name} ${selectedStaff.last_name} (${selectedStaff.staff_code})`}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
               <div className="space-y-6">
@@ -338,11 +409,21 @@ export function AdminTeachers() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center block">Start</label>
-                      <input type="time" value={leaveData.startTime} className="w-full h-12 px-4 bg-slate-50 border border-slate-100 rounded-xl font-bold text-center" />
+                      <input 
+                        type="time" 
+                        value={leaveData.startTime} 
+                        onChange={(e) => setLeaveData({...leaveData, startTime: e.target.value})}
+                        className="w-full h-12 px-4 bg-slate-50 border border-slate-100 rounded-xl font-bold text-center" 
+                      />
                     </div>
                     <div className="space-y-2">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center block">End</label>
-                      <input type="time" value={leaveData.endTime} className="w-full h-12 px-4 bg-slate-50 border border-slate-100 rounded-xl font-bold text-center" />
+                      <input 
+                        type="time" 
+                        value={leaveData.endTime} 
+                        onChange={(e) => setLeaveData({...leaveData, endTime: e.target.value})}
+                        className="w-full h-12 px-4 bg-slate-50 border border-slate-100 rounded-xl font-bold text-center" 
+                      />
                     </div>
                   </div>
                 )}
@@ -350,27 +431,56 @@ export function AdminTeachers() {
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Reason / Context</label>
                   <textarea 
                     placeholder="Enter reason for leave..."
+                    value={leaveData.reason}
+                    onChange={(e) => setLeaveData({...leaveData, reason: e.target.value})}
                     className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold h-24 outline-none focus:border-indigo-300 transition-all resize-none"
                   ></textarea>
                 </div>
-                <button className="w-full h-14 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-900 transition-all shadow-xl shadow-indigo-900/10">
-                  Apply for Leave
+                <button 
+                  onClick={async () => {
+                    const { error } = await supabase
+                      .from('staff_leaves')
+                      .insert({
+                        staff_code: selectedStaff.staff_code,
+                        leave_date: leaveData.date,
+                        full_day: leaveData.isFullDay,
+                        begin_time: leaveData.isFullDay ? null : leaveData.startTime,
+                        end_time: leaveData.isFullDay ? null : leaveData.endTime,
+                        reason: leaveData.reason
+                      });
+                    
+                    if (!error) {
+                      fetchStaffLeaves(selectedStaff.staff_code);
+                      setLeaveData({
+                        date: '',
+                        isFullDay: true,
+                        startTime: '07:30',
+                        endTime: '14:30',
+                        reason: ''
+                      });
+                    }
+                  }}
+                  className="w-full h-14 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-900 transition-all shadow-xl shadow-indigo-900/10"
+                >
+                  Log Absence
                 </button>
               </div>
 
-              <div className="bg-slate-50 rounded-[2.5rem] p-8 border border-slate-100 h-fit">
-                <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Request Status</h5>
-                <div className="space-y-4">
-                  {[
-                    { label: 'Pending', color: 'bg-amber-100 text-amber-600 border-amber-200' },
-                    { label: 'Accepted', color: 'bg-emerald-100 text-emerald-600 border-emerald-200 opacity-30 shadow-none grayscale' },
-                    { label: 'Denied', color: 'bg-red-100 text-red-600 border-red-200 opacity-30 shadow-none grayscale' }
-                  ].map((s) => (
-                    <div key={s.label} className={cn("p-4 rounded-2xl border flex items-center justify-between font-black uppercase text-[10px] tracking-widest transition-all", s.color)}>
-                      {s.label}
-                      {s.label === 'Pending' && <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />}
+              <div className="bg-slate-50 rounded-[2.5rem] p-8 border border-slate-100 overflow-y-auto max-h-[400px]">
+                <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Recent Absences</h5>
+                <div className="space-y-3">
+                  {staffLeaves.map((leave, idx) => (
+                    <div key={idx} className="p-4 bg-white rounded-2xl border border-slate-100 flex flex-col gap-1">
+                      <div className="flex justify-between items-center">
+                        <span className="font-black text-slate-900 text-sm">{leave.leave_date}</span>
+                        <span className="text-[9px] font-bold px-2 py-0.5 bg-slate-100 rounded-full text-slate-500 uppercase">
+                          {leave.full_day ? 'Full Day' : `${leave.begin_time}-${leave.end_time}`}
+                        </span>
+                      </div>
+                      {leave.reason && <p className="text-[11px] text-slate-500 leading-tight italic">{leave.reason}</p>}
                     </div>
                   ))}
+                  {staffLeaves.length === 0 && <p className="text-center text-slate-300 italic text-sm mt-10">No records found</p>}
                 </div>
               </div>
             </div>
@@ -381,14 +491,8 @@ export function AdminTeachers() {
           <Modal 
             isOpen={true} 
             onClose={() => setActiveModal(null)} 
-            title="Operation Timetable" 
-            subtitle={`${selectedStaff.full_name} (${selectedStaff.staff_code})`}
-            footer={
-              <div className="flex gap-4">
-                <button onClick={() => setActiveModal(null)} className="flex-1 py-4 bg-slate-50 text-slate-500 rounded-2xl font-black uppercase text-[11px] tracking-widest border border-slate-100">Cancel</button>
-                <button className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[11px] tracking-widest hover:bg-indigo-700 shadow-xl shadow-indigo-200 transition-all">Update Master Schedule</button>
-              </div>
-            }
+            title="Teaching Timetable" 
+            subtitle={`${selectedStaff.first_name} ${selectedStaff.last_name} (${selectedStaff.staff_code})`}
           >
             <div className="space-y-8">
               <div className="flex bg-slate-100 p-1.5 rounded-2xl">
@@ -411,29 +515,31 @@ export function AdminTeachers() {
                   <thead>
                     <tr className="bg-white border-b border-slate-100">
                       <th className="p-4 text-[10px] font-black text-slate-300 uppercase tracking-widest">Period</th>
-                      {['MON', 'TUE', 'WED', 'THU', 'FRI'].map(d => (
-                        <th key={d} className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">{d}</th>
+                      {['Day 1', 'Day 2', 'Day 3', 'Day 4', 'Day 5', 'Day 6', 'Day 7', 'Day 8', 'Day 9', 'Day 10'].map(d => (
+                        <th key={d} className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">{d}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'].map(p => (
+                    {[1, 2, 3, 4, 5, 6, 7].map(p => (
                       <tr key={p} className="border-b border-slate-50 last:border-0 group hover:bg-white transition-colors">
-                        <td className="p-4 font-black text-slate-400 text-sm whitespace-nowrap">{p}</td>
-                        {[1,2,3,4,5].map(d => (
-                          <td key={d} className="p-2 border-l border-slate-50">
-                            <input 
-                              type="text" 
-                              className="w-full h-10 bg-transparent border-0 outline-none text-center font-bold text-slate-900 group-hover:bg-slate-50 rounded-lg focus:ring-2 focus:ring-indigo-100 transition-all"
-                              placeholder="-"
-                            />
-                          </td>
-                        ))}
+                        <td className="p-4 font-black text-slate-400 text-sm whitespace-nowrap">P{p}</td>
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(d => {
+                          const slot = timetable.find(t => t.day_of_cycle === d && t.period === p && t.cycle === activeCycle);
+                          return (
+                            <td key={d} className="p-2 border-l border-slate-50 min-w-[80px]">
+                              <div className="text-center font-bold text-slate-900 text-xs py-2 bg-white/50 rounded-lg group-hover:bg-slate-50 transition-all">
+                                {slot ? slot.class_code : '-'}
+                              </div>
+                            </td>
+                          );
+                        })}
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+              <p className="text-[10px] text-center text-slate-400 uppercase tracking-widest font-bold">Read-only view of master teaching schedule</p>
             </div>
           </Modal>
         )}

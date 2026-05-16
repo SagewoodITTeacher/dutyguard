@@ -77,6 +77,13 @@ export function AdminDashboard() {
     { id: '5', teacher: 'Amop Teacher', date: '2026-05-25', fullDay: false, startTime: '12:00', endTime: '14:30', reason: 'Workshop', status: 'Pending' }
   ]);
 
+  const [scheduleOptions, setScheduleOptions] = useState({
+     startDate: new Date().toISOString().split('T')[0],
+     endDate: new Date().toISOString().split('T')[0],
+     respectHomeroom: true,
+     techPriority: true
+  });
+
   const mockConflicts = [
     { date: '20 May', staffCode: 'AMOP', description: 'is on leave (full day)' },
     { date: '22 May', staffCode: 'LOGF', description: 'is teaching Gr 8/9 (P5)' },

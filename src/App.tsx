@@ -13,7 +13,7 @@ import { FullScheduleManualEditing } from './pages/FullScheduleManualEditing';
 import { ManagerDashboard } from './pages/ManagerDashboard';
 import { Login } from './pages/Login';
 import React, { useEffect, useState } from 'react';
-import { supabase, supabaseUrl, supabaseAnonKey } from './lib/supabase';
+import { supabase } from './lib/supabase';
 import { Toaster } from './components/ui/Toaster';
 import { getUserRoleInfo, UserRoleInfo } from './services/authService';
 import { AlertCircle, ShieldAlert, Shield } from 'lucide-react';
@@ -35,8 +35,11 @@ export default function App() {
       }
     }, 10000);
 
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
     // Check for missing credentials first
-    if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('YOUR_') || supabaseAnonKey.includes('YOUR_')) {
+    if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('your-project-ref')) {
       console.error('[DutyGuard] Missing Supabase credentials');
       setConfigError(true);
       setLoading(false);

@@ -99,7 +99,7 @@ export function TeacherDashboard() {
         .eq('email', user.email)
         .single();
 
-      if (staffError) throw staffError;
+      if (!staffData) throw new Error('Staff data not found');
       setStaff(staffData);
 
       // Get duties from view

@@ -21,7 +21,9 @@ export function AdminTeachers() {
   const [roleValue, setRoleValue] = useState('');
   const [subjects, setSubjects] = useState<any[]>([]);
   const [newSubject, setNewSubject] = useState('');
-  const [allSubjects, setAllSubjects] = useState<any[]>([]); // To populate a dropdown for adding
+  const [allSubjects, setAllSubjects] = useState<any[]>([]); 
+  const [loadingSubjects, setLoadingSubjects] = useState(false);
+  const [loadingLeaves, setLoadingLeaves] = useState(false);
   const [loadingBreak, setLoadingBreak] = useState(false);
   const [breakDuties, setBreakDuties] = useState<{ morning: string[], afternoon: string[] }>({ morning: [], afternoon: [] });
   const [newBreakDate, setNewBreakDate] = useState({ morning: '', afternoon: '' });
@@ -35,7 +37,9 @@ export function AdminTeachers() {
   });
   const [staffLeaves, setStaffLeaves] = useState<any[]>([]);
   const [timetable, setTimetable] = useState<any[]>([]);
-  const [activeCycle, setActiveCycle] = useState('Cycle 1');
+  const [loadingTimetable, setLoadingTimetable] = useState(false);
+  const [activeCycle, setActiveCycle] = useState('');
+  const [availableCycles, setAvailableCycles] = useState<string[]>([]);
 
   useEffect(() => {
     fetchStaff();
@@ -67,6 +71,7 @@ export function AdminTeachers() {
 
   const fetchStaffSubjects = async (staffCode: string) => {
     try {
+      setLoadingSubjects(true);
       const { data, error } = await supabase
         .from('teacher_subjects')
         .select(`
@@ -75,43 +80,62 @@ export function AdminTeachers() {
             subject_name
           )
         `)
-        .eq('staff_code', staffCode);
+        .eq('staff_code', staffCode.trim());
       
       if (error) throw error;
       setSubjects(data || []);
     } catch (err) {
       console.error('Error fetching subjects:', err);
+    } finally {
+      setLoadingSubjects(false);
     }
   };
 
   const fetchStaffLeaves = async (staffCode: string) => {
     try {
+      setLoadingLeaves(true);
       const { data, error } = await supabase
         .from('staff_leaves')
         .select('*')
-        .eq('staff_code', staffCode)
+        .eq('staff_code', staffCode.trim())
         .order('leave_date', { ascending: false });
       
       if (error) throw error;
       setStaffLeaves(data || []);
     } catch (err) {
       console.error('Error fetching leaves:', err);
+    } finally {
+      setLoadingLeaves(false);
     }
   };
 
   const fetchStaffTimetable = async (staffCode: string) => {
     try {
+      setLoadingTimetable(true);
       const { data, error } = await supabase
         .from('teaching_timetable')
         .select('*')
-        .eq('staff_code', staffCode)
+        .eq('staff_code', staffCode.trim())
         .order('day_of_cycle')
         .order('period');
       
       if (error) throw error;
-      setTimetable(data || []);
+      
+      const records = data || [];
+      const uniqueCycles = [...new Set(records.map(t => t.cycle))].sort();
+      setAvailableCycles(uniqueCycles);
+      
+      if (uniqueCycles.length > 0 && (!activeCycle || !uniqueCycles.includes(activeCycle))) {
+        setActiveCycle(uniqueCycles[0]);
+      } else if (uniqueCycles.length === 0) {
+        setActiveCycle('');
+      }
+
+      setTimetable(records);
     } catch (err) {
       console.error('Error fetching timetable:', err);
+    } finally {
+      setLoadingTimetable(false);
     }
   };
 
@@ -119,29 +143,81 @@ export function AdminTeachers() {
     if (!staffCode) return;
     try {
       setLoadingBreak(true);
+      setBreakDuties({ morning: [], afternoon: [] });
+      
+      const normalizedCode = staffCode.trim();
+      
+      // DIAGNOSTIC CORE
+      console.group(`Break Duty Investigation: ${normalizedCode}`);
+      
+      const { data: listAllCodes } = await supabase.from('staff_duties').select('staff_code');
+      if (listAllCodes) {
+        const unique = [...new Set(listAllCodes.map(r => r.staff_code))];
+        console.log('Codes in DB:', unique.map(c => `[${c}]`));
+        const match = unique.find(c => (c || '').trim().toUpperCase() === normalizedCode.toUpperCase());
+        if (match) console.log(`MATCH FOUND: "[${match}]" (Input was: "[${normalizedCode}]")`);
+      }
+
+      console.log('Fetching from "staff_duties"...');
       const { data, error } = await supabase
         .from('staff_duties')
         .select('*')
-        .eq('staff_code', staffCode.trim())
+        .ilike('staff_code', normalizedCode.trim())
         .order('duty_date', { ascending: true });
       
       if (error) throw error;
+      console.log(`Record count: ${data?.length || 0}`);
+      
+      if (data && data.length > 0) {
+        console.log('Sample record fields:', Object.keys(data[0]));
+        console.log('Sample duty_type:', data[0].duty_type);
+        console.log('Sample duty_date:', data[0].duty_date);
+      } else {
+        // Fallback check to view
+        const { data: vd } = await supabase.from('vw_break_duty').select('*').ilike('staff_code', normalizedCode.trim()).limit(1);
+        console.log('View check (vw_break_duty):', vd?.length ? 'FOUND' : 'NOT FOUND');
+      }
+
+      console.groupEnd();
       
       const records = data || [];
       const morning = records
-        .filter(d => d.duty_type?.trim().toLowerCase() === 'morning')
-        .map(d => (d.duty_date || '').split('T')[0]);
+        .filter(d => {
+          const type = (d.duty_type || '').trim().toLowerCase();
+          return type === 'morning' || type === 'm' || type.includes('morn');
+        })
+        .map(d => {
+          const dateStr = (d.duty_date || '').toString().trim();
+          // Extract YYYY-MM-DD specifically
+          const match = dateStr.match(/^(\d{4})[-/](\d{2})[-/](\d{2})/);
+          if (match) return `${match[1]}-${match[2]}-${match[3]}`;
+          if (/^\d{4}/.test(dateStr)) return dateStr.substring(0, 10);
+          return dateStr;
+        });
       
       const afternoon = records
-        .filter(d => d.duty_type?.trim().toLowerCase() === 'afternoon')
-        .map(d => (d.duty_date || '').split('T')[0]);
+        .filter(d => {
+          const type = (d.duty_type || '').trim().toLowerCase();
+          return type === 'afternoon' || type === 'after' || type === 'p' || type === 'a';
+        })
+        .map(d => {
+          const dateStr = (d.duty_date || '').toString().trim();
+          const match = dateStr.match(/^(\d{4})[-/](\d{2})[-/](\d{2})/);
+          if (match) return `${match[1]}-${match[2]}-${match[3]}`;
+          if (/^\d{4}/.test(dateStr)) return dateStr.substring(0, 10);
+          return dateStr;
+        });
+
+      console.log('Processed Mornings:', morning.length);
+      console.log('Processed Afternoons:', afternoon.length);
+      console.log('--- DIAGNOSTIC END ---');
 
       setBreakDuties({ 
         morning: morning.filter(Boolean), 
         afternoon: afternoon.filter(Boolean) 
       });
     } catch (err) {
-      console.error('Error fetching break duties:', err);
+      console.error('Critical fetch error:', err);
     } finally {
       setLoadingBreak(false);
     }
@@ -157,7 +233,7 @@ export function AdminTeachers() {
       const { data: existingDuties, error: fetchError } = await supabase
         .from('staff_duties')
         .select('*')
-        .eq('staff_code', selectedStaff.staff_code);
+        .ilike('staff_code', selectedStaff.staff_code.trim());
       
       if (fetchError) throw fetchError;
       
@@ -440,55 +516,99 @@ export function AdminTeachers() {
                 <select 
                   value={newSubject}
                   onChange={(e) => setNewSubject(e.target.value)}
-                  className="flex-1 h-14 px-6 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold"
+                  disabled={loadingSubjects}
+                  className="flex-1 h-14 px-6 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold disabled:opacity-50"
                 >
                   <option value="">Select subject...</option>
-                  {allSubjects.map(s => (
-                    <option key={s.subject_code} value={s.subject_code}>{s.subject_name}</option>
-                  ))}
+                  {allSubjects
+                    .filter(s => !subjects.some(active => active.subject_code === s.subject_code))
+                    .map(s => (
+                      <option key={s.subject_code} value={s.subject_code}>{s.subject_name}</option>
+                    ))}
                 </select>
                 <button 
                   onClick={async () => { 
-                    if (newSubject) { 
+                    if (newSubject && !loadingSubjects) { 
+                      // Duplicate Check (extra guard)
+                      if (subjects.some(s => s.subject_code === newSubject)) {
+                        return;
+                      }
+
+                      setLoadingSubjects(true);
                       const { error } = await supabase
                         .from('teacher_subjects')
                         .insert({ staff_code: selectedStaff.staff_code, subject_code: newSubject });
                       
                       if (!error) {
-                        fetchStaffSubjects(selectedStaff.staff_code);
+                        await fetchStaffSubjects(selectedStaff.staff_code);
                         setNewSubject('');
+                      } else {
+                        console.error('Error adding subject:', error);
+                        alert('Failed to assign subject.');
                       }
+                      setLoadingSubjects(false);
                     } 
                   }}
-                  className="h-14 px-6 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-indigo-700 transition-all flex items-center gap-2"
+                  disabled={!newSubject || loadingSubjects}
+                  className="h-14 px-6 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-indigo-700 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Plus className="h-4 w-4" /> Add
+                  {loadingSubjects ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  Add
                 </button>
               </div>
 
               <div className="space-y-3">
-                {subjects.map((sub, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 group">
-                    <span className="font-bold text-slate-700 uppercase tracking-tight">{(sub.subjects as any)?.subject_name || sub.subject_code}</span>
-                    <button 
-                      onClick={async () => {
-                        const { error } = await supabase
-                          .from('teacher_subjects')
-                          .delete()
-                          .eq('staff_code', selectedStaff.staff_code)
-                          .eq('subject_code', sub.subject_code);
-                        
-                        if (!error) {
-                          fetchStaffSubjects(selectedStaff.staff_code);
-                        }
-                      }}
-                      className="h-10 w-10 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl flex items-center justify-center transition-all opacity-0 group-hover:opacity-100"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                {loadingSubjects && subjects.length === 0 ? (
+                  <div className="flex justify-center py-10">
+                    <Loader2 className="h-8 w-8 text-indigo-200 animate-spin" />
                   </div>
-                ))}
-                {subjects.length === 0 && <p className="text-center text-slate-400 italic">No subjects assigned</p>}
+                ) : (
+                  <>
+                    {subjects.map((sub, idx) => {
+                      const subjectName = Array.isArray(sub.subjects) 
+                        ? sub.subjects[0]?.subject_name 
+                        : sub.subjects?.subject_name;
+                      
+                      return (
+                        <div key={idx} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 group">
+                          <div className="flex flex-col">
+                            <span className="font-black text-slate-900 uppercase tracking-tight italic">
+                              {subjectName || 'Unknown Subject'}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-bold tracking-widest uppercase">
+                              {sub.subject_code}
+                            </span>
+                          </div>
+                          <button 
+                            onClick={async () => {
+                              if (loadingSubjects) return;
+                              setLoadingSubjects(true);
+                              const { error } = await supabase
+                                .from('teacher_subjects')
+                                .delete()
+                                .eq('staff_code', selectedStaff.staff_code)
+                                .eq('subject_code', sub.subject_code);
+                              
+                              if (!error) {
+                                await fetchStaffSubjects(selectedStaff.staff_code);
+                              }
+                              setLoadingSubjects(false);
+                            }}
+                            className="h-10 w-10 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl flex items-center justify-center transition-all opacity-0 group-hover:opacity-100"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                    {subjects.length === 0 && !loadingSubjects && (
+                      <div className="py-12 bg-slate-50/50 rounded-[2rem] border border-dashed border-slate-200 flex flex-col items-center justify-center gap-4">
+                        <BookOpen className="h-8 w-8 text-slate-200" />
+                        <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] italic">No subjects assigned</p>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </div>
           </Modal>
@@ -504,99 +624,159 @@ export function AdminTeachers() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
               <div className="space-y-6">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Date</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-2">Absence Date</label>
                   <input 
                     type="date" 
                     value={leaveData.date}
                     onChange={(e) => setLeaveData({...leaveData, date: e.target.value})}
-                    className="w-full h-12 px-4 bg-slate-50 border border-slate-100 rounded-xl font-bold" 
+                    className="w-full h-14 px-6 bg-slate-50 border border-slate-100 rounded-2xl font-bold focus:border-indigo-300 outline-none transition-all" 
                   />
                 </div>
-                <label className="flex items-center gap-3 cursor-pointer group">
+                <label className="flex items-center gap-4 cursor-pointer group bg-slate-50 p-4 rounded-2xl border border-slate-100 hover:border-indigo-100 transition-all">
+                  <div className={cn(
+                    "h-6 w-6 rounded-lg border-2 flex items-center justify-center transition-all",
+                    leaveData.isFullDay ? "bg-indigo-600 border-indigo-600" : "border-slate-200 bg-white"
+                  )}>
+                    {leaveData.isFullDay && <Check className="h-4 w-4 text-white" />}
+                  </div>
                   <input 
                     type="checkbox" 
                     checked={leaveData.isFullDay}
                     onChange={(e) => setLeaveData({...leaveData, isFullDay: e.target.checked})}
-                    className="h-5 w-5 rounded-lg border-slate-200 text-indigo-600 focus:ring-indigo-500" 
+                    className="hidden" 
                   />
-                  <span className="text-sm font-bold text-slate-600 transition-colors group-hover:text-slate-900">Full Day Absence</span>
+                  <span className="text-sm font-black text-slate-700 uppercase tracking-tight italic">Full Day Absence</span>
                 </label>
-                {!leaveData.isFullDay && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center block">Start</label>
-                      <input 
-                        type="time" 
-                        value={leaveData.startTime} 
-                        onChange={(e) => setLeaveData({...leaveData, startTime: e.target.value})}
-                        className="w-full h-12 px-4 bg-slate-50 border border-slate-100 rounded-xl font-bold text-center" 
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center block">End</label>
-                      <input 
-                        type="time" 
-                        value={leaveData.endTime} 
-                        onChange={(e) => setLeaveData({...leaveData, endTime: e.target.value})}
-                        className="w-full h-12 px-4 bg-slate-50 border border-slate-100 rounded-xl font-bold text-center" 
-                      />
-                    </div>
-                  </div>
-                )}
+
+                <AnimatePresence mode="wait">
+                  {!leaveData.isFullDay && (
+                    <motion.div 
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="grid grid-cols-2 gap-4 pb-1">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center block">Start</label>
+                          <input 
+                            type="time" 
+                            value={leaveData.startTime} 
+                            onChange={(e) => setLeaveData({...leaveData, startTime: e.target.value})}
+                            className="w-full h-12 px-4 bg-slate-50 border border-slate-100 rounded-xl font-bold text-center outline-none focus:border-indigo-300 transition-all text-sm" 
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center block">End</label>
+                          <input 
+                            type="time" 
+                            value={leaveData.endTime} 
+                            onChange={(e) => setLeaveData({...leaveData, endTime: e.target.value})}
+                            className="w-full h-12 px-4 bg-slate-50 border border-slate-100 rounded-xl font-bold text-center outline-none focus:border-indigo-300 transition-all text-sm" 
+                          />
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Reason / Context</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-2">Reason / Context</label>
                   <textarea 
-                    placeholder="Enter reason for leave..."
+                    placeholder="Provide operational context for this request..."
                     value={leaveData.reason}
                     onChange={(e) => setLeaveData({...leaveData, reason: e.target.value})}
-                    className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold h-24 outline-none focus:border-indigo-300 transition-all resize-none"
+                    className="w-full p-6 bg-slate-50 border border-slate-100 rounded-[2rem] font-bold h-32 outline-none focus:border-indigo-300 transition-all resize-none placeholder:text-slate-300"
                   ></textarea>
                 </div>
                 <button 
+                  disabled={loadingLeaves || !leaveData.date || !leaveData.reason}
                   onClick={async () => {
-                    const { error } = await supabase
-                      .from('staff_leaves')
-                      .insert({
-                        staff_code: selectedStaff.staff_code,
-                        leave_date: leaveData.date,
-                        full_day: leaveData.isFullDay,
-                        begin_time: leaveData.isFullDay ? null : leaveData.startTime,
-                        end_time: leaveData.isFullDay ? null : leaveData.endTime,
-                        reason: leaveData.reason
-                      });
-                    
-                    if (!error) {
-                      fetchStaffLeaves(selectedStaff.staff_code);
-                      setLeaveData({
-                        date: '',
-                        isFullDay: true,
-                        startTime: '07:30',
-                        endTime: '14:30',
-                        reason: ''
-                      });
+                    setLoadingLeaves(true);
+                    try {
+                      const { error } = await supabase
+                        .from('staff_leaves')
+                        .insert({
+                          staff_code: selectedStaff.staff_code,
+                          leave_date: leaveData.date,
+                          full_day: leaveData.isFullDay,
+                          begin_time: leaveData.isFullDay ? null : leaveData.startTime,
+                          end_time: leaveData.isFullDay ? null : leaveData.endTime,
+                          reason: leaveData.reason
+                        });
+                      
+                      if (!error) {
+                        await fetchStaffLeaves(selectedStaff.staff_code);
+                        setLeaveData({
+                          date: '',
+                          isFullDay: true,
+                          startTime: '07:30',
+                          endTime: '14:30',
+                          reason: ''
+                        });
+                      } else {
+                        throw error;
+                      }
+                    } catch (err) {
+                      console.error('Error logging leave:', err);
+                      alert('Failed to log absence.');
+                    } finally {
+                      setLoadingLeaves(false);
                     }
                   }}
-                  className="w-full h-14 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-900 transition-all shadow-xl shadow-indigo-900/10"
+                  className="w-full h-16 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-[11px] tracking-widest hover:bg-indigo-600 transition-all shadow-2xl shadow-indigo-900/10 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 group"
                 >
+                  {loadingLeaves ? <Loader2 className="h-5 w-5 animate-spin" /> : <Shield className="h-5 w-5 group-hover:rotate-12 transition-transform" />}
                   Log Absence
                 </button>
               </div>
 
-              <div className="bg-slate-50 rounded-[2.5rem] p-8 border border-slate-100 overflow-y-auto max-h-[400px]">
-                <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Recent Absences</h5>
-                <div className="space-y-3">
-                  {staffLeaves.map((leave, idx) => (
-                    <div key={idx} className="p-4 bg-white rounded-2xl border border-slate-100 flex flex-col gap-1">
-                      <div className="flex justify-between items-center">
-                        <span className="font-black text-slate-900 text-sm">{leave.leave_date}</span>
-                        <span className="text-[9px] font-bold px-2 py-0.5 bg-slate-100 rounded-full text-slate-500 uppercase">
-                          {leave.full_day ? 'Full Day' : `${leave.begin_time}-${leave.end_time}`}
-                        </span>
-                      </div>
-                      {leave.reason && <p className="text-[11px] text-slate-500 leading-tight italic">{leave.reason}</p>}
+              <div className="bg-slate-50/50 rounded-[3rem] p-8 border border-slate-100 flex flex-col h-[500px]">
+                <div className="flex items-center justify-between mb-8">
+                  <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Deployment Log</h5>
+                  <div className="h-8 px-3 rounded-full bg-indigo-50 border border-indigo-100 flex items-center gap-2">
+                    <Clock className="h-3 w-3 text-indigo-400" />
+                    <span className="text-[9px] font-black text-indigo-600 uppercase tracking-widest">{staffLeaves.length} Records</span>
+                  </div>
+                </div>
+
+                <div className="flex-1 space-y-4 overflow-y-auto pr-4 scrollbar-hide">
+                  {loadingLeaves && staffLeaves.length === 0 ? (
+                    <div className="h-full flex items-center justify-center">
+                      <Loader2 className="h-8 w-8 text-indigo-200 animate-spin" />
                     </div>
-                  ))}
-                  {staffLeaves.length === 0 && <p className="text-center text-slate-300 italic text-sm mt-10">No records found</p>}
+                  ) : (
+                    <>
+                      {staffLeaves.map((leave, idx) => (
+                        <div key={idx} className="group p-5 bg-white rounded-3xl border border-slate-100 shadow-sm hover:border-indigo-100 transition-all">
+                          <div className="flex justify-between items-start mb-3">
+                            <div className="flex flex-col">
+                              <span className="font-black text-slate-900 text-sm tracking-tight italic uppercase">
+                                {new Date(leave.leave_date + 'T12:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                              </span>
+                              <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">
+                                Approved
+                              </span>
+                            </div>
+                            <span className="text-[9px] font-black px-4 py-1.5 bg-slate-50 rounded-full text-slate-400 uppercase tracking-widest border border-slate-100 italic">
+                              {leave.full_day ? 'Full Day' : `${leave.begin_time} - ${leave.end_time}`}
+                            </span>
+                          </div>
+                          {leave.reason && (
+                            <div className="p-3 bg-slate-50 rounded-xl text-[11px] text-slate-500 font-medium leading-relaxed italic border border-slate-100/50">
+                              {leave.reason}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      {staffLeaves.length === 0 && (
+                        <div className="h-full flex flex-col items-center justify-center gap-4 py-20 bg-white/50 rounded-[2.5rem] border border-dashed border-slate-200">
+                           <CalendarX className="h-10 w-10 text-slate-200" />
+                           <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest italic">No absence records detected</p>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -619,9 +799,10 @@ export function AdminTeachers() {
                 </button>
                 <button 
                   onClick={handleUpdateBreakDuties}
-                  className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[11px] tracking-widest hover:bg-indigo-700 shadow-xl shadow-indigo-200 transition-all"
+                  disabled={loadingBreak}
+                  className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[11px] tracking-widest hover:bg-indigo-700 shadow-xl shadow-indigo-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Update
+                  {loadingBreak ? 'Updating...' : 'Update'}
                 </button>
               </div>
             }
@@ -788,50 +969,79 @@ export function AdminTeachers() {
           >
             <div className="space-y-8">
               <div className="flex bg-slate-100 p-1.5 rounded-2xl">
-                {['Cycle 1', 'Cycle 2'].map(c => (
-                  <button 
-                    key={c}
-                    onClick={() => setActiveCycle(c)}
-                    className={cn(
-                      "flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-                      activeCycle === c ? "bg-white text-indigo-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
-                    )}
-                  >
-                    {c}
-                  </button>
-                ))}
+                {availableCycles.length > 0 ? (
+                  availableCycles.map(c => (
+                    <button 
+                      key={c}
+                      onClick={() => setActiveCycle(c)}
+                      className={cn(
+                        "flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                        activeCycle === c ? "bg-white text-indigo-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
+                      )}
+                    >
+                      {c}
+                    </button>
+                  ))
+                ) : (
+                  <div className="flex-1 py-3 text-center text-[10px] font-black text-slate-400 uppercase tracking-widest italic">
+                    No Cycles Found
+                  </div>
+                )}
               </div>
 
-              <div className="overflow-x-auto rounded-[2rem] border border-slate-100">
-                <table className="w-full text-left border-collapse bg-slate-50/20">
-                  <thead>
-                    <tr className="bg-white border-b border-slate-100">
-                      <th className="p-4 text-[10px] font-black text-slate-300 uppercase tracking-widest">Period</th>
-                      {['Day 1', 'Day 2', 'Day 3', 'Day 4', 'Day 5', 'Day 6', 'Day 7', 'Day 8', 'Day 9', 'Day 10'].map(d => (
-                        <th key={d} className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">{d}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[1, 2, 3, 4, 5, 6, 7].map(p => (
-                      <tr key={p} className="border-b border-slate-50 last:border-0 group hover:bg-white transition-colors">
-                        <td className="p-4 font-black text-slate-400 text-sm whitespace-nowrap">P{p}</td>
-                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(d => {
-                          const slot = timetable.find(t => t.day_of_cycle === d && t.period === p && t.cycle === activeCycle);
-                          return (
-                            <td key={d} className="p-2 border-l border-slate-50 min-w-[80px]">
-                              <div className="text-center font-bold text-slate-900 text-xs py-2 bg-white/50 rounded-lg group-hover:bg-slate-50 transition-all">
-                                {slot ? slot.class_code : '-'}
-                              </div>
-                            </td>
-                          );
-                        })}
+              {loadingTimetable ? (
+                <div className="py-20 flex flex-col items-center justify-center gap-4">
+                  <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}>
+                    <Loader2 className="h-10 w-10 text-indigo-200" />
+                  </motion.div>
+                  <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest transition-all animate-pulse">Syncing tactical schedule...</p>
+                </div>
+              ) : timetable.length === 0 ? (
+                <div className="py-20 bg-slate-50/50 rounded-[2.5rem] border border-dashed border-slate-200 flex flex-col items-center justify-center gap-4">
+                  <LayoutGrid className="h-10 w-10 text-slate-200" />
+                  <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest italic">No timetable entries found</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-[2rem] border border-slate-100">
+                  <table className="w-full text-left border-collapse bg-slate-50/20">
+                    <thead>
+                      <tr className="bg-white border-b border-slate-100">
+                        <th className="p-4 text-[10px] font-black text-slate-300 uppercase tracking-widest">Period</th>
+                        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].map((d, i) => (
+                          <th key={d} className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">{d}</th>
+                        ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <p className="text-[10px] text-center text-slate-400 uppercase tracking-widest font-bold">Read-only view of master teaching schedule</p>
+                    </thead>
+                    <tbody>
+                      {[1, 2, 3, 4, 5, 6, 7].map(p => (
+                        <tr key={p} className="border-b border-slate-50 last:border-0 group hover:bg-white transition-colors">
+                          <td className="p-4 font-black text-slate-400 text-sm whitespace-nowrap uppercase italic tracking-tighter">P{p}</td>
+                          {[0, 1, 2, 3, 4].map(d => {
+                            const slot = timetable.find(t => t.day_of_cycle === d && t.period === p && t.cycle === activeCycle);
+                            return (
+                              <td key={d} className="p-2 border-l border-slate-50 min-w-[120px]">
+                                <motion.div 
+                                  initial={slot ? { opacity: 0, scale: 0.9 } : {}}
+                                  animate={slot ? { opacity: 1, scale: 1 } : {}}
+                                  className={cn(
+                                    "text-center font-black text-[11px] py-4 rounded-xl transition-all uppercase tracking-tight italic",
+                                    slot 
+                                      ? "bg-indigo-50 text-indigo-600 border border-indigo-100 shadow-sm shadow-indigo-100/50" 
+                                      : "bg-white/50 text-slate-200"
+                                  )}
+                                >
+                                  {slot ? slot.class_code : '---'}
+                                </motion.div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <p className="text-[10px] text-center text-slate-400 uppercase tracking-widest font-bold">Strategic display of master instructional deployment</p>
             </div>
           </Modal>
         )}

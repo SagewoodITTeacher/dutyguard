@@ -9,10 +9,40 @@ export function Login() {
   const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
   const [magicLinkSent, setMagicLinkSent] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
-  const handleMagicLink = async (e: React.FormEvent) => {
-    e.preventDefault();
+  React.useEffect(() => {
+    // Check for auth errors in the URL hash (common for expired magic links)
+    const hash = window.location.hash;
+    if (hash && hash.includes('error=')) {
+      const params = new URLSearchParams(hash.substring(1));
+      const errorMsg = params.get('error_description');
+      const errorCode = params.get('error_code');
+      
+      if (errorCode === 'otp_expired' || errorMsg?.includes('expired')) {
+        setError('Your magic link has expired. Please request a new one below.');
+      } else if (errorMsg) {
+        setError(errorMsg.replace(/\+/g, ' '));
+      }
+      
+      // Clear hash to prevent repeated error messages
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (resendCooldown > 0) {
+      timer = setInterval(() => {
+        setResendCooldown((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
+
+  const handleMagicLink = async (e?: React.FormEvent | React.MouseEvent) => {
+    e?.preventDefault();
     if (!email) {
       setError('Please enter your email address');
       return;
@@ -30,9 +60,15 @@ export function Login() {
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        if (error.message.includes('Email not found')) {
+          throw new Error('Access denied. This email is not registered in DutyGuard.');
+        }
+        throw error;
+      }
       
       setMagicLinkSent(true);
+      setResendCooldown(30);
       setLoading(false);
     } catch (err: any) {
       setError(err.message || 'Failed to send magic link');
@@ -151,9 +187,27 @@ export function Login() {
             )}
 
             {magicLinkSent && (
-              <div className="p-5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-500 text-xs font-black uppercase tracking-tight text-center flex flex-col items-center gap-2">
-                <CheckCircle2 className="h-5 w-5" />
-                Magic link sent! Check your school email.
+              <div className="p-6 bg-emerald-500/10 border border-emerald-500/20 rounded-[2rem] text-emerald-500 text-[11px] font-black uppercase tracking-tight text-center flex flex-col items-center gap-4">
+                <div className="h-12 w-12 rounded-full bg-emerald-500/20 flex items-center justify-center animate-pulse">
+                  <CheckCircle2 className="h-6 w-6" />
+                </div>
+                <div className="space-y-2">
+                  <p className="text-emerald-400 text-lg italic tracking-tight">Magic Link Sent Successfully!</p>
+                  <p className="text-slate-400 normal-case font-bold leading-relaxed">
+                    Check <span className="text-emerald-500">{email}</span> for your access link. 
+                    If not found, please check your spam/junk folder. 
+                    Link expires in 60 minutes.
+                  </p>
+                </div>
+                
+                <button
+                  type="button"
+                  onClick={handleMagicLink}
+                  disabled={loading || resendCooldown > 0}
+                  className="mt-2 px-6 py-3 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-500 rounded-xl font-black uppercase text-[9px] tracking-[0.2em] transition-all disabled:opacity-50"
+                >
+                  {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend Magic Link'}
+                </button>
               </div>
             )}
 

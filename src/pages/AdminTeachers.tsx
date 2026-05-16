@@ -4,7 +4,7 @@ import {
   MoreHorizontal, Mail, Shield, Award,
   Loader2, ArrowRight, ChevronRight,
   TrendingUp, Clock, BookOpen, CalendarX, 
-  LayoutGrid, X, Check, Trash2, Plus
+  LayoutGrid, X, Check, Trash2, Plus, Coffee
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { supabase } from '../lib/supabase';
@@ -15,13 +15,17 @@ export function AdminTeachers() {
   const [staff, setStaff] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedStaff, setSelectedStaff] = useState<any>(null);
-  const [activeModal, setActiveModal] = useState<'role' | 'subjects' | 'leave' | 'timetable' | null>(null);
+  const [activeModal, setActiveModal] = useState<'role' | 'subjects' | 'leave' | 'timetable' | 'break' | null>(null);
 
   // Modal States
   const [roleValue, setRoleValue] = useState('');
   const [subjects, setSubjects] = useState<any[]>([]);
   const [newSubject, setNewSubject] = useState('');
   const [allSubjects, setAllSubjects] = useState<any[]>([]); // To populate a dropdown for adding
+  const [loadingBreak, setLoadingBreak] = useState(false);
+  const [breakDuties, setBreakDuties] = useState<{ morning: string[], afternoon: string[] }>({ morning: [], afternoon: [] });
+  const [newBreakDate, setNewBreakDate] = useState({ morning: '', afternoon: '' });
+  const [selectedBreakItem, setSelectedBreakItem] = useState<{ morning: string | null, afternoon: string | null }>({ morning: null, afternoon: null });
   const [leaveData, setLeaveData] = useState({
     date: '',
     isFullDay: true,
@@ -108,6 +112,111 @@ export function AdminTeachers() {
       setTimetable(data || []);
     } catch (err) {
       console.error('Error fetching timetable:', err);
+    }
+  };
+
+  const fetchStaffBreakDuties = async (staffCode: string) => {
+    if (!staffCode) return;
+    try {
+      setLoadingBreak(true);
+      const { data, error } = await supabase
+        .from('staff_duties')
+        .select('*')
+        .eq('staff_code', staffCode.trim())
+        .order('duty_date', { ascending: true });
+      
+      if (error) throw error;
+      
+      const records = data || [];
+      const morning = records
+        .filter(d => d.duty_type?.trim().toLowerCase() === 'morning')
+        .map(d => (d.duty_date || '').split('T')[0]);
+      
+      const afternoon = records
+        .filter(d => d.duty_type?.trim().toLowerCase() === 'afternoon')
+        .map(d => (d.duty_date || '').split('T')[0]);
+
+      setBreakDuties({ 
+        morning: morning.filter(Boolean), 
+        afternoon: afternoon.filter(Boolean) 
+      });
+    } catch (err) {
+      console.error('Error fetching break duties:', err);
+    } finally {
+      setLoadingBreak(false);
+    }
+  };
+
+  const handleUpdateBreakDuties = async () => {
+    if (!selectedStaff) return;
+    
+    try {
+      setLoadingBreak(true);
+      
+      // Step 1 check - ensure we have the latest from DB to compare
+      const { data: existingDuties, error: fetchError } = await supabase
+        .from('staff_duties')
+        .select('*')
+        .eq('staff_code', selectedStaff.staff_code);
+      
+      if (fetchError) throw fetchError;
+      
+      const morningFromDB = existingDuties?.filter(d => d.duty_type === 'Morning') || [];
+      const afternoonFromDB = existingDuties?.filter(d => d.duty_type === 'Afternoon') || [];
+
+      // Step 2: Delete Logic
+      const morningToDelete = morningFromDB
+        .filter(d => !breakDuties.morning.includes(d.duty_date))
+        .map(d => d.id);
+      
+      if (morningToDelete.length > 0) {
+        const { error: delError } = await supabase.from('staff_duties').delete().in('id', morningToDelete);
+        if (delError) throw delError;
+      }
+
+      const afternoonToDelete = afternoonFromDB
+        .filter(d => !breakDuties.afternoon.includes(d.duty_date))
+        .map(d => d.id);
+      
+      if (afternoonToDelete.length > 0) {
+        const { error: delError } = await supabase.from('staff_duties').delete().in('id', afternoonToDelete);
+        if (delError) throw delError;
+      }
+
+      // Step 3: Insert Logic for Morning
+      const morningToInsert = breakDuties.morning
+        .filter(date => !morningFromDB.some(d => d.duty_date === date))
+        .map(date => ({
+          staff_code: selectedStaff.staff_code,
+          duty_date: date,
+          duty_type: 'Morning'
+        }));
+      
+      if (morningToInsert.length > 0) {
+        const { error: insError } = await supabase.from('staff_duties').insert(morningToInsert);
+        if (insError) throw insError;
+      }
+
+      // Step 4: Insert Logic for Afternoon
+      const afternoonToInsert = breakDuties.afternoon
+        .filter(date => !afternoonFromDB.some(d => d.duty_date === date))
+        .map(date => ({
+          staff_code: selectedStaff.staff_code,
+          duty_date: date,
+          duty_type: 'Afternoon'
+        }));
+      
+      if (afternoonToInsert.length > 0) {
+        const { error: insError } = await supabase.from('staff_duties').insert(afternoonToInsert);
+        if (insError) throw insError;
+      }
+
+      setActiveModal(null);
+    } catch (err) {
+      console.error('Error synchronizing break duties:', err);
+      alert('Strategic synchronization failed. Field data may be lost.');
+    } finally {
+      setLoadingBreak(false);
     }
   };
 
@@ -229,6 +338,13 @@ export function AdminTeachers() {
                         title="Leave"
                       >
                          <CalendarX className="h-4 w-4" />
+                      </button>
+                      <button 
+                        onClick={() => { setSelectedStaff(person); setActiveModal('break'); fetchStaffBreakDuties(person.staff_code); }}
+                        className="h-10 w-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 hover:text-pink-600 hover:border-pink-100 transition-all hover:bg-pink-50"
+                        title="Break Duty"
+                      >
+                         <Coffee className="h-4 w-4" />
                       </button>
                       <button 
                          onClick={() => { setSelectedStaff(person); setActiveModal('timetable'); fetchStaffTimetable(person.staff_code); }}
@@ -485,6 +601,182 @@ export function AdminTeachers() {
               </div>
             </div>
           </Modal>
+        )}
+
+        {activeModal === 'break' && selectedStaff && (
+          <Modal 
+            isOpen={true} 
+            onClose={() => setActiveModal(null)} 
+            title="Break Duty Assignments" 
+            subtitle={`${selectedStaff.first_name} ${selectedStaff.last_name} (${selectedStaff.staff_code})`}
+            footer={
+              <div className="flex gap-4">
+                <button 
+                  onClick={() => setActiveModal(null)} 
+                  className="flex-1 py-4 bg-slate-50 text-slate-500 rounded-2xl font-black uppercase text-[11px] tracking-widest border border-slate-100 transition-all hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleUpdateBreakDuties}
+                  className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[11px] tracking-widest hover:bg-indigo-700 shadow-xl shadow-indigo-200 transition-all"
+                >
+                  Update
+                </button>
+              </div>
+            }
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+              {loadingBreak ? (
+                <div className="col-span-full py-20 flex flex-col items-center justify-center gap-4">
+                  <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}>
+                    <Loader2 className="h-10 w-10 text-indigo-500" />
+                  </motion.div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Synching Tactical Assignments...</p>
+                </div>
+              ) : (
+                <>
+                  {/* Morning Column */}
+                  <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Morning</h5>
+                  <button 
+                    disabled={!selectedBreakItem.morning}
+                    onClick={() => {
+                      if (selectedBreakItem.morning) {
+                        setBreakDuties(prev => ({
+                          ...prev,
+                          morning: prev.morning.filter(date => date !== selectedBreakItem.morning)
+                        }));
+                        setSelectedBreakItem(prev => ({ ...prev, morning: null }));
+                      }
+                    }}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-50 text-red-600 text-[9px] font-black uppercase tracking-widest border border-red-100 disabled:opacity-30 transition-all"
+                  >
+                    <Trash2 className="h-3 w-3" /> Remove
+                  </button>
+                </div>
+                
+                <div className="flex gap-3">
+                  <input 
+                    type="date" 
+                    value={newBreakDate.morning}
+                    onChange={(e) => setNewBreakDate(prev => ({ ...prev, morning: e.target.value }))}
+                    className="flex-1 h-12 px-4 bg-slate-50 border border-slate-100 rounded-xl font-bold text-sm outline-none" 
+                  />
+                  <button 
+                    onClick={() => {
+                      if (newBreakDate.morning && !breakDuties.morning.includes(newBreakDate.morning)) {
+                        setBreakDuties(prev => ({
+                          ...prev,
+                          morning: [...prev.morning, newBreakDate.morning].sort()
+                        }));
+                        setNewBreakDate(prev => ({ ...prev, morning: '' }));
+                      }
+                    }}
+                    className="h-12 w-12 bg-indigo-600 text-white rounded-xl flex items-center justify-center hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+                  >
+                    <Plus className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <div className="bg-slate-50 rounded-2xl border border-slate-100 overflow-hidden">
+                  <div className="max-h-48 overflow-y-auto p-2 space-y-1">
+                    {breakDuties.morning.map(date => (
+                      <button
+                        key={date}
+                        onClick={() => setSelectedBreakItem(prev => ({ ...prev, morning: date }))}
+                        className={cn(
+                          "w-full px-4 py-3 rounded-xl text-left font-bold text-xs transition-all",
+                          selectedBreakItem.morning === date 
+                            ? "bg-white text-indigo-600 shadow-sm border border-indigo-100" 
+                            : "text-slate-500 hover:bg-white/50"
+                        )}
+                      >
+                        {new Date(date + 'T12:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      </button>
+                    ))}
+                    {breakDuties.morning.length === 0 && (
+                      <div className="py-8 text-center">
+                        <p className="text-[10px] text-slate-300 italic font-bold">No Morning Duties</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Afternoon Column */}
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Afternoon</h5>
+                  <button 
+                    disabled={!selectedBreakItem.afternoon}
+                    onClick={() => {
+                      if (selectedBreakItem.afternoon) {
+                        setBreakDuties(prev => ({
+                          ...prev,
+                          afternoon: prev.afternoon.filter(date => date !== selectedBreakItem.afternoon)
+                        }));
+                        setSelectedBreakItem(prev => ({ ...prev, afternoon: null }));
+                      }
+                    }}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-50 text-red-600 text-[9px] font-black uppercase tracking-widest border border-red-100 disabled:opacity-30 transition-all"
+                  >
+                    <Trash2 className="h-3 w-3" /> Remove
+                  </button>
+                </div>
+                
+                <div className="flex gap-3">
+                  <input 
+                    type="date" 
+                    value={newBreakDate.afternoon}
+                    onChange={(e) => setNewBreakDate(prev => ({ ...prev, afternoon: e.target.value }))}
+                    className="flex-1 h-12 px-4 bg-slate-50 border border-slate-100 rounded-xl font-bold text-sm outline-none" 
+                  />
+                  <button 
+                    onClick={() => {
+                      if (newBreakDate.afternoon && !breakDuties.afternoon.includes(newBreakDate.afternoon)) {
+                        setBreakDuties(prev => ({
+                          ...prev,
+                          afternoon: [...prev.afternoon, newBreakDate.afternoon].sort()
+                        }));
+                        setNewBreakDate(prev => ({ ...prev, afternoon: '' }));
+                      }
+                    }}
+                    className="h-12 w-12 bg-indigo-600 text-white rounded-xl flex items-center justify-center hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+                  >
+                    <Plus className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <div className="bg-slate-50 rounded-2xl border border-slate-100 overflow-hidden">
+                  <div className="max-h-48 overflow-y-auto p-2 space-y-1">
+                    {breakDuties.afternoon.map(date => (
+                      <button
+                        key={date}
+                        onClick={() => setSelectedBreakItem(prev => ({ ...prev, afternoon: date }))}
+                        className={cn(
+                          "w-full px-4 py-3 rounded-xl text-left font-bold text-xs transition-all",
+                          selectedBreakItem.afternoon === date 
+                            ? "bg-white text-indigo-600 shadow-sm border border-indigo-100" 
+                            : "text-slate-500 hover:bg-white/50"
+                        )}
+                      >
+                        {new Date(date + 'T12:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      </button>
+                    ))}
+                    {breakDuties.afternoon.length === 0 && (
+                      <div className="py-8 text-center">
+                        <p className="text-[10px] text-slate-300 italic font-bold">No Afternoon Duties</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
         )}
 
         {activeModal === 'timetable' && selectedStaff && (

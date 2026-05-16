@@ -23,75 +23,75 @@ export default function App() {
   const [roleInfo, setRoleInfo] = useState<UserRoleInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [configError, setConfigError] = useState(false);
+  const [logs, setLogs] = useState<string[]>([]);
 
   useEffect(() => {
     console.log('[DutyGuard] App mounted, initializing auth matrix...');
     
-    // Safety timeout to prevent infinite loading
+    // Safety timeout to prevent infinite loading - shortened to 5s
     const safetyTimeout = setTimeout(() => {
-      if (loading) {
-        console.warn('[DutyGuard] Auth initialization timed out, forcing loading to false');
-        setLoading(false);
-      }
-    }, 10000);
+      setLoading(prev => {
+        if (prev) {
+          console.warn('[DutyGuard] Auth initialization safety net triggered');
+          return false;
+        }
+        return prev;
+      });
+    }, 5000);
 
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-    // Check for missing credentials first
-    if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('your-project-ref')) {
-      console.error('[DutyGuard] Missing Supabase credentials');
-      setConfigError(true);
-      setLoading(false);
-      clearTimeout(safetyTimeout);
-      return;
-    }
-
     async function initializeAuth() {
-      // Fast-track demo session check
-      const demoUserId = localStorage.getItem('dutyguard_demo_session');
-      let currentSession: any = null;
+      try {
+        console.log('[DutyGuard] Running initializeAuth...');
+        // Fast-track demo session check
+        const demoUserId = localStorage.getItem('dutyguard_demo_session');
+        let currentSession: any = null;
 
-      if (demoUserId) {
-        console.log('[DutyGuard] Detected Demo Session:', demoUserId);
-        currentSession = {
-          user: { id: demoUserId, email: demoUserId + '@school.edu' },
-          access_token: 'demo-token',
-        };
-        setSession(currentSession);
-      } else {
-        try {
+        if (demoUserId) {
+          console.log('[DutyGuard] Detected Demo Session:', demoUserId);
+          currentSession = {
+            user: { id: demoUserId, email: demoUserId + '@school.edu' },
+            access_token: 'demo-token',
+          };
+          setSession(currentSession);
+        } else if (supabaseUrl && !supabaseUrl.includes('placeholder')) {
           console.log('[DutyGuard] Fetching Supabase session...');
-          const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-          if (sessionError) throw sessionError;
-          currentSession = session;
-          setSession(session);
-        } catch (err) {
-          console.error('[DutyGuard] Real auth fetch failed:', err);
+          const { data, error: sessionError } = await supabase.auth.getSession();
+          if (sessionError) {
+            console.error('[DutyGuard] sessionError:', sessionError);
+          } else {
+            currentSession = data.session;
+            setSession(currentSession);
+          }
+        } else {
+          console.warn('[DutyGuard] No Supabase credentials - starting in demo mode');
         }
-      }
 
-      console.log('[DutyGuard] Auth resolved:', currentSession ? (currentSession.access_token === 'demo-token' ? 'DEMO' : 'Real') : 'None');
-      
-      if (currentSession) {
-        try {
-          console.log('[DutyGuard] Mapping role for uid:', currentSession.user.id);
-          const info = await getUserRoleInfo(currentSession.user.id);
-          console.log('[DutyGuard] Role mapped:', info?.ui_role);
-          setRoleInfo(info);
-        } catch (err) {
-          console.error('[DutyGuard] Role mapping failed:', err);
+        if (currentSession) {
+          try {
+            console.log('[DutyGuard] Mapping role for uid:', currentSession.user.id);
+            const info = await getUserRoleInfo(currentSession.user.id);
+            console.log('[DutyGuard] Role mapped:', info?.ui_role);
+            setRoleInfo(info);
+          } catch (err) {
+            console.error('[DutyGuard] Role mapping failed:', err);
+          }
         }
+      } catch (err) {
+        console.error('[DutyGuard] Global initialization error:', err);
+      } finally {
+        console.log('[DutyGuard] Initialization procedure finished');
+        setLoading(false);
+        clearTimeout(safetyTimeout);
       }
-
-      setLoading(false);
-      clearTimeout(safetyTimeout);
     }
 
     initializeAuth();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('[DutyGuard] Auth State Change:', event);
+    const authSubscription = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('[DutyGuard] Auth State Change Event:', event);
       
       const isDemo = !!localStorage.getItem('dutyguard_demo_session');
       
@@ -103,12 +103,14 @@ export default function App() {
 
       // If a real session comes in, it overrides demo mode
       if (session && session.access_token !== 'demo-token') {
+        console.log('[DutyGuard] Real session detected, clearing demo mode');
         localStorage.removeItem('dutyguard_demo_session');
       }
 
       setSession(session);
       if (session) {
         try {
+          console.log('[DutyGuard] Fetching role info for session update...');
           const info = await getUserRoleInfo(session.user.id);
           setRoleInfo(info);
         } catch (err) {
@@ -119,7 +121,12 @@ export default function App() {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      console.log('[DutyGuard] Cleaning up effect...');
+      if (authSubscription?.data?.subscription) {
+        authSubscription.data.subscription.unsubscribe();
+      }
+    };
   }, []);
 
   if (configError) {
@@ -161,15 +168,33 @@ export default function App() {
           <div className="text-center">
             <p className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-500 mb-2">System Deployment</p>
             <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Initializing Protocol Matrix...</p>
+            <div className="mt-4 space-y-1">
+              {logs.map((log, i) => (
+                <p key={i} className="text-[9px] font-mono text-slate-600 lowercase opacity-60">
+                  {`> ${log}`}
+                </p>
+              ))}
+            </div>
           </div>
           
           {/* Emergency Reset Button */}
-          <button 
-            onClick={() => setLoading(false)}
-            className="mt-8 px-6 py-2 bg-slate-900 border border-slate-800 rounded-xl text-[9px] font-black uppercase tracking-widest text-slate-500 hover:text-white transition-all"
-          >
-            Bypass Initialization
-          </button>
+          <div className="flex flex-col gap-2">
+            <button 
+              onClick={() => setLoading(false)}
+              className="mt-8 px-6 py-2 bg-slate-900 border border-slate-800 rounded-xl text-[9px] font-black uppercase tracking-widest text-slate-500 hover:text-white transition-all"
+            >
+              Bypass Initialization
+            </button>
+            <button 
+              onClick={() => {
+                localStorage.clear();
+                window.location.reload();
+              }}
+              className="px-6 py-2 bg-red-950/20 border border-red-900/20 rounded-xl text-[9px] font-black uppercase tracking-widest text-red-500 hover:bg-red-900/40 transition-all"
+            >
+              Factory Reset Matrix
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -257,7 +282,7 @@ function ProtectedRoute({
   allowedRoles: string[]; 
   userRole?: string;
 }) {
-  if (!userRole) return null;
+  if (!userRole) return <Navigate to="/" replace />;
   if (!allowedRoles.includes(userRole)) {
     return <Navigate to="/" replace />;
   }

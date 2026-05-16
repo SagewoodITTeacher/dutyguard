@@ -90,7 +90,10 @@ export function TeacherDashboard() {
       }
 
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        console.warn("[DutyGuard] No user found in Teacher Dashboard");
+        return;
+      }
 
       // Get staff profile
       const { data: staffData, error: staffError } = await supabase

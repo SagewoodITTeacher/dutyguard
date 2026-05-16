@@ -20,7 +20,7 @@ import {
   Layout,
   FileText
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { Link } from 'react-router-dom';
 
@@ -122,213 +122,216 @@ export function AdminDashboard() {
   }, [selectedPeriod]);
 
   const fetchAdminData = async (initial = false) => {
-    if (initial) setIsLoading(true);
-    else setIsUpdating(true);
+    try {
+      if (initial) setIsLoading(true);
+      else setIsUpdating(true);
 
-    const isDemo = localStorage.getItem('dutyguard_demo_session');
-    if (isDemo) {
-      let teachers = JSON.parse(localStorage.getItem('dutyguard_demo_teachers') || '[]');
-      let venues = JSON.parse(localStorage.getItem('dutyguard_demo_venues') || '[]');
-      
-      // Fallback for demo if data is missing
-      if (teachers.length === 0) {
-        teachers = [
-          { id: '1', code: 'JOHD', full_name: 'John Doe', teacher_type: 'Marathon' },
-          { id: '2', code: 'FRAN', full_name: 'Fran Smith', teacher_type: 'Scattered' },
-          { id: '3', code: 'AMOP', full_name: 'Amos Opel', teacher_type: 'Marathon' },
-          { id: '4', code: 'LOGF', full_name: 'Logan Ford', teacher_type: 'Scattered' },
-          { id: '5', code: 'AYAM', full_name: 'Aya Mills', teacher_type: 'Marathon' },
-          { id: '6', code: 'SARH', full_name: 'Sarah Hill', teacher_type: 'Scattered' },
-          { id: '7', code: 'MICK', full_name: 'Mick Key', teacher_type: 'Marathon' },
-          { id: '8', code: 'BENJ', full_name: 'Ben Jonson', teacher_type: 'Scattered' },
-          { id: '9', code: 'CASE', full_name: 'Casey Case', teacher_type: 'Marathon' },
-          { id: '10', code: 'DANN', full_name: 'Danny Name', teacher_type: 'Scattered' },
-          { id: '11', code: 'ELIZ', full_name: 'Elizabeth Z', teacher_type: 'Marathon' },
-          { id: '12', code: 'FRED', full_name: 'Fred Red', teacher_type: 'Scattered' },
-          { id: '13', code: 'GEOR', full_name: 'George Green', teacher_type: 'Marathon' },
-          { id: '14', code: 'HOLL', full_name: 'Holly Wood', teacher_type: 'Scattered' },
-          { id: '15', code: 'IVAN', full_name: 'Ivan Terrible', teacher_type: 'Marathon' },
-          { id: '16', code: 'JACK', full_name: 'Jack Black', teacher_type: 'Scattered' },
-          { id: '17', code: 'KELL', full_name: 'Kelly Blue', teacher_type: 'Marathon' },
-          { id: '18', code: 'LIAM', full_name: 'Liam Neeson', teacher_type: 'Scattered' },
-          { id: '19', code: 'MONA', full_name: 'Mona Lisa', teacher_type: 'Marathon' },
-          { id: '20', code: 'NICK', full_name: 'Nick Fury', teacher_type: 'Scattered' },
-          { id: '21', code: 'OPRA', full_name: 'Oprah W', teacher_type: 'Marathon' },
-          { id: '22', code: 'PAUL', full_name: 'Paul Rudd', teacher_type: 'Scattered' },
-          { id: '23', code: 'QUIN', full_name: 'Quinton T', teacher_type: 'Marathon' },
-          { id: '24', code: 'ROSE', full_name: 'Rose Tyler', teacher_type: 'Scattered' },
-          { id: '25', code: 'SAMU', full_name: 'Samuel L', teacher_type: 'Marathon' },
-          { id: '26', code: 'TINA', full_name: 'Tina Fey', teacher_type: 'Scattered' },
-          { id: '27', code: 'URSU', full_name: 'Ursula K', teacher_type: 'Marathon' },
-          { id: '28', code: 'VICT', full_name: 'Victor Doom', teacher_type: 'Scattered' },
-          { id: '29', code: 'WILL', full_name: 'Will Smith', teacher_type: 'Marathon' },
-          { id: '30', code: 'XAVI', full_name: 'Xavier X', teacher_type: 'Scattered' },
-        ];
-        localStorage.setItem('dutyguard_demo_teachers', JSON.stringify(teachers));
-      }
-      
-      if (venues.length === 0) {
-        venues = [
-          { id: 'v1', name: 'Great Hall', type: 'Hall', capacity: 300 },
-          { id: 'v2', name: 'CAT_LAB 1', type: 'Lab', capacity: 26 },
-          { id: 'v3', name: 'IT_LAB 1', type: 'Lab', capacity: 26 },
-          { id: 'v4', name: 'LS_LAB 1', type: 'Lab', capacity: 30 },
-          { id: 'v5', name: 'Classroom 101', type: 'Class', capacity: 25 },
-          { id: 'v6', name: 'Classroom 102', type: 'Class', capacity: 25 },
-          { id: 'v7', name: 'Classroom 103', type: 'Class', capacity: 25 },
-          { id: 'v8', name: 'Classroom 104', type: 'Class', capacity: 25 },
-          { id: 'v9', name: 'Classroom 105', type: 'Class', capacity: 25 },
-          { id: 'v10', name: 'Classroom 106', type: 'Class', capacity: 25 },
-          { id: 'v11', name: 'Classroom 107', type: 'Class', capacity: 25 },
-          { id: 'v12', name: 'Classroom 108', type: 'Class', capacity: 25 },
-        ];
-        localStorage.setItem('dutyguard_demo_venues', JSON.stringify(venues));
-      }
-
-      let storedDuties = JSON.parse(localStorage.getItem('dutyguard_demo_generated_duties') || '[]');
-      const logs = JSON.parse(localStorage.getItem('dutyguard_demo_audit_logs') || '[]');
-
-      // Generate rich mock data for exactly 5 grades
-      if (storedDuties.length === 0 || initial) {
-        const mockSubjects = [
-          { name: 'Mathematics', canBePrac: false },
-          { name: 'English FAL', canBePrac: false },
-          { name: 'Physical Sciences', canBePrac: true },
-          { name: 'History', canBePrac: false },
-          { name: 'Accounting', canBePrac: false },
-          { name: 'CAT', canBePrac: true },
-          { name: 'Life Sciences', canBePrac: true },
-          { name: 'Afrikaans EAT', canBePrac: false },
-          { name: 'Physical Education', canBePrac: true }
-        ];
-        const grades = ['12', '11', '10', '9', '8'];
+      const isDemo = localStorage.getItem('dutyguard_demo_session');
+      if (isDemo) {
+        let teachers = [];
+        try {
+          teachers = JSON.parse(localStorage.getItem('dutyguard_demo_teachers') || '[]');
+        } catch (e) { console.error("Parse teachers failed", e); }
         
-        let shuffledTeachers = [...teachers].sort(() => 0.5 - Math.random());
-        let teacherPtr = 0;
+        let venues = [];
+        try {
+          venues = JSON.parse(localStorage.getItem('dutyguard_demo_venues') || '[]');
+        } catch (e) { console.error("Parse venues failed", e); }
+        
+        // Fallback for demo if data is missing
+        if (teachers.length === 0) {
+          teachers = [
+            { id: '1', code: 'JOHD', full_name: 'John Doe', teacher_type: 'Marathon' },
+            { id: '2', code: 'FRAN', full_name: 'Fran Smith', teacher_type: 'Scattered' },
+            { id: '3', code: 'AMOP', full_name: 'Amos Opel', teacher_type: 'Marathon' },
+            { id: '4', code: 'LOGF', full_name: 'Logan Ford', teacher_type: 'Scattered' },
+            { id: '5', code: 'AYAM', full_name: 'Aya Mills', teacher_type: 'Marathon' },
+            { id: '6', code: 'SARH', full_name: 'Sarah Hill', teacher_type: 'Scattered' },
+            { id: '7', code: 'MICK', full_name: 'Mick Key', teacher_type: 'Marathon' },
+            { id: '8', code: 'BENJ', full_name: 'Ben Jonson', teacher_type: 'Scattered' },
+            { id: '9', code: 'CASE', full_name: 'Casey Case', teacher_type: 'Marathon' },
+            { id: '10', code: 'DANN', full_name: 'Danny Name', teacher_type: 'Scattered' },
+            { id: '11', code: 'ELIZ', full_name: 'Elizabeth Z', teacher_type: 'Marathon' },
+            { id: '12', code: 'FRED', full_name: 'Fred Red', teacher_type: 'Scattered' },
+            { id: '13', code: 'GEOR', full_name: 'George Green', teacher_type: 'Marathon' },
+            { id: '14', code: 'HOLL', full_name: 'Holly Wood', teacher_type: 'Scattered' },
+            { id: '15', code: 'IVAN', full_name: 'Ivan Terrible', teacher_type: 'Marathon' },
+            { id: '16', code: 'JACK', full_name: 'Jack Black', teacher_type: 'Scattered' },
+            { id: '17', code: 'KELL', full_name: 'Kelly Blue', teacher_type: 'Marathon' },
+            { id: '18', code: 'LIAM', full_name: 'Liam Neeson', teacher_type: 'Scattered' },
+            { id: '19', code: 'MONA', full_name: 'Mona Lisa', teacher_type: 'Marathon' },
+            { id: '20', code: 'NICK', full_name: 'Nick Fury', teacher_type: 'Scattered' },
+            { id: '21', code: 'OPRA', full_name: 'Oprah W', teacher_type: 'Marathon' },
+            { id: '22', code: 'PAUL', full_name: 'Paul Rudd', teacher_type: 'Scattered' },
+            { id: '23', code: 'QUIN', full_name: 'Quinton T', teacher_type: 'Marathon' },
+            { id: '24', code: 'ROSE', full_name: 'Rose Tyler', teacher_type: 'Scattered' },
+            { id: '25', code: 'SAMU', full_name: 'Samuel L', teacher_type: 'Marathon' },
+            { id: '26', code: 'TINA', full_name: 'Tina Fey', teacher_type: 'Scattered' },
+            { id: '27', code: 'URSU', full_name: 'Ursula K', teacher_type: 'Marathon' },
+            { id: '28', code: 'VICT', full_name: 'Victor Doom', teacher_type: 'Scattered' },
+            { id: '29', code: 'WILL', full_name: 'Will Smith', teacher_type: 'Marathon' },
+            { id: '30', code: 'XAVI', full_name: 'Xavier X', teacher_type: 'Scattered' },
+          ];
+          localStorage.setItem('dutyguard_demo_teachers', JSON.stringify(teachers));
+        }
+        
+        if (venues.length === 0) {
+          venues = [
+            { id: 'v1', name: 'Great Hall', type: 'Hall', capacity: 300 },
+            { id: 'v2', name: 'CAT_LAB 1', type: 'Lab', capacity: 26 },
+            { id: 'v3', name: 'IT_LAB 1', type: 'Lab', capacity: 26 },
+            { id: 'v4', name: 'LS_LAB 1', type: 'Lab', capacity: 30 },
+            { id: 'v5', name: 'Classroom 101', type: 'Class', capacity: 25 },
+            { id: 'v6', name: 'Classroom 102', type: 'Class', capacity: 25 },
+            { id: 'v7', name: 'Classroom 103', type: 'Class', capacity: 25 },
+            { id: 'v8', name: 'Classroom 104', type: 'Class', capacity: 25 },
+            { id: 'v9', name: 'Classroom 105', type: 'Class', capacity: 25 },
+            { id: 'v10', name: 'Classroom 106', type: 'Class', capacity: 25 },
+            { id: 'v11', name: 'Classroom 107', type: 'Class', capacity: 25 },
+            { id: 'v12', name: 'Classroom 108', type: 'Class', capacity: 25 },
+          ];
+          localStorage.setItem('dutyguard_demo_venues', JSON.stringify(venues));
+        }
 
-        storedDuties = grades.flatMap(grade => {
-          const subjectObj = mockSubjects[Math.floor(Math.random() * mockSubjects.length)];
-          const isPrac = subjectObj.canBePrac && (subjectObj.name === 'CAT' || subjectObj.name === 'Life Sciences' || Math.random() > 0.5);
-          const paperType = isPrac ? 'Prac' : Math.random() > 0.5 ? 'P1' : 'P2';
-          const subject = subjectObj.name;
+        let storedDuties = [];
+        try {
+          storedDuties = JSON.parse(localStorage.getItem('dutyguard_demo_generated_duties') || '[]');
+        } catch (e) { storedDuties = []; }
+        
+        let logs = [];
+        try {
+          logs = JSON.parse(localStorage.getItem('dutyguard_demo_audit_logs') || '[]');
+        } catch (e) { logs = []; }
+
+        // Generate rich mock data for exactly 5 grades
+        if (storedDuties.length === 0 || initial) {
+          const mockSubjects = [
+            { name: 'Mathematics', canBePrac: false },
+            { name: 'English FAL', canBePrac: false },
+            { name: 'Physical Sciences', canBePrac: true },
+            { name: 'History', canBePrac: false },
+            { name: 'Accounting', canBePrac: false },
+            { name: 'CAT', canBePrac: true },
+            { name: 'Life Sciences', canBePrac: true },
+            { name: 'Afrikaans EAT', canBePrac: false },
+            { name: 'Physical Education', canBePrac: true }
+          ];
+          const grades = ['12', '11', '10', '9', '8'];
           
-          let totalLearners = grade === '12' ? 120 + Math.floor(Math.random() * 60) : 60 + Math.floor(Math.random() * 60);
+          let shuffledTeachers = [...teachers].sort(() => 0.5 - Math.random());
+          let teacherPtr = 0;
 
-          if (grade === '12' && !isPrac) {
-            // Hall Exclusive Logic (1 per 30 learners)
-            const teacherCount = Math.ceil(totalLearners / 30);
-            const hallVenue = venues.find((v: any) => v.type === 'Hall') || venues[0];
+          storedDuties = grades.flatMap(grade => {
+            const subjectObj = mockSubjects[Math.floor(Math.random() * mockSubjects.length)];
+            const isPrac = subjectObj.canBePrac && (subjectObj.name === 'CAT' || subjectObj.name === 'Life Sciences' || Math.random() > 0.5);
+            const paperType = isPrac ? 'Prac' : Math.random() > 0.5 ? 'P1' : 'P2';
+            const subject = subjectObj.name;
             
-            const assignedTeachers = [];
-            for (let i = 0; i < teacherCount; i++) {
-              const t = shuffledTeachers[teacherPtr % shuffledTeachers.length];
-              teacherPtr++;
-              assignedTeachers.push({
-                id: t.id,
-                code: t.code,
-                name: t.full_name,
-                teacher_type: t.teacher_type,
-                role: i === teacherCount - 1 ? 'standby' : 'invigilator'
-              });
-            }
+            let totalLearners = grade === '12' ? 120 + Math.floor(Math.random() * 60) : 60 + Math.floor(Math.random() * 60);
 
-            return [{
-              id: `demo-${grade}-${selectedDate}-${selectedPeriod}`,
-              date: selectedDate,
-              period: selectedPeriod,
-              grade,
-              subject,
-              paper_type: paperType,
-              learners_count: totalLearners,
-              session: PERIOD_CONFIG[selectedPeriod].start,
-              duration_minutes: 120,
-              venues: hallVenue,
-              assignments: assignedTeachers
-            }];
-          } else {
-            // Venue Capacity Logic
-            const capacity = isPrac ? 26 : 25; // Lab vs Classroom
-            const venueCount = Math.min(Math.ceil(totalLearners / capacity), 5); 
-
-            const venueSegments = Array.from({ length: venueCount }).map((_, i) => {
-              const venueType = isPrac ? 'Lab' : 'Class';
-              const venue = venues.find((v: any) => v.type === venueType && v.capacity >= capacity && !storedDuties.some((sd:any) => sd.venues?.id === v.id)) || venues[i + 4] || venues[0];
-              const t = shuffledTeachers[teacherPtr % shuffledTeachers.length];
-              teacherPtr++;
+            if (grade === '12' && !isPrac) {
+              const teacherCount = Math.ceil(totalLearners / 30);
+              const hallVenue = venues.find((v: any) => v.type === 'Hall') || venues[0];
               
-              if (!t) return null;
+              const assignedTeachers = [];
+              for (let i = 0; i < teacherCount; i++) {
+                const t = shuffledTeachers[teacherPtr % shuffledTeachers.length];
+                teacherPtr++;
+                assignedTeachers.push({
+                  id: t.id,
+                  code: t.code,
+                  name: t.full_name,
+                  teacher_type: t.teacher_type,
+                  role: i === teacherCount - 1 ? 'standby' : 'invigilator'
+                });
+              }
 
-              const assignments = [{
-                id: t.id,
-                code: t.code,
-                name: t.full_name,
-                teacher_type: t.teacher_type,
-                role: 'invigilator'
-              }];
-
-              return {
-                id: `demo-${grade}-${i}-${selectedDate}-${selectedPeriod}`,
+              return [{
+                id: `demo-${grade}-${selectedDate}-${selectedPeriod}`,
                 date: selectedDate,
                 period: selectedPeriod,
                 grade,
                 subject,
                 paper_type: paperType,
-                learners_count: Math.min(capacity, totalLearners - (i * capacity)),
+                learners_count: totalLearners,
                 session: PERIOD_CONFIG[selectedPeriod].start,
-                duration_minutes: 90,
-                venues: venue,
-                assignments: assignments,
-                tech_support: isPrac && i === 0 ? [
-                  shuffledTeachers[teacherPtr % shuffledTeachers.length],
-                  shuffledTeachers[(teacherPtr + 1) % shuffledTeachers.length]
-                ].map(tt => {
-                  teacherPtr++;
-                  return {
-                    id: tt.id,
-                    code: tt.code,
-                    name: tt.full_name,
-                    role: 'tech',
-                    teacher_type: tt.teacher_type
-                  };
-                }) : []
-              };
-            });
+                duration_minutes: 120,
+                venues: hallVenue,
+                assignments: assignedTeachers
+              }];
+            } else {
+              const capacity = isPrac ? 26 : 25;
+              const venueCount = Math.min(Math.ceil(totalLearners / capacity), 5); 
 
-            // Add ONE standby for the grade session (sub-card 6)
-            const sbTeacher = shuffledTeachers[teacherPtr % shuffledTeachers.length];
-            teacherPtr++;
-            if (sbTeacher && venueSegments.length > 0) {
-              const firstSeg = venueSegments.find(s => s !== null);
-              if (firstSeg) {
-                firstSeg.assignments.push({
-                  id: sbTeacher.id,
-                  code: sbTeacher.code,
-                  name: sbTeacher.full_name,
-                  teacher_type: sbTeacher.teacher_type,
-                  role: 'standby'
-                });
+              const venueSegments = Array.from({ length: venueCount }).map((_, i) => {
+                const venueType = isPrac ? 'Lab' : 'Class';
+                const venue = venues.find((v: any) => v.type === venueType && v.capacity >= capacity && !storedDuties.some((sd:any) => sd.venues?.id === v.id)) || venues[i + 4] || venues[0];
+                const t = shuffledTeachers[teacherPtr % shuffledTeachers.length];
+                teacherPtr++;
+                
+                if (!t) return null;
+
+                const assignments = [{
+                  id: t.id,
+                  code: t.code,
+                  name: t.full_name,
+                  teacher_type: t.teacher_type,
+                  role: 'invigilator'
+                }];
+
+                return {
+                  id: `demo-${grade}-${i}-${selectedDate}-${selectedPeriod}`,
+                  date: selectedDate,
+                  period: selectedPeriod,
+                  grade,
+                  subject,
+                  paper_type: paperType,
+                  learners_count: Math.min(capacity, totalLearners - (i * capacity)),
+                  session: PERIOD_CONFIG[selectedPeriod].start,
+                  duration_minutes: 90,
+                  venues: venue,
+                  assignments: assignments,
+                  tech_support: isPrac && i === 0 ? [
+                    shuffledTeachers[teacherPtr % shuffledTeachers.length],
+                    shuffledTeachers[(teacherPtr + 1) % shuffledTeachers.length]
+                  ].map(tt => {
+                    teacherPtr++;
+                    return { id: tt.id, code: tt.code, name: tt.full_name, role: 'tech', teacher_type: tt.teacher_type };
+                  }) : []
+                };
+              });
+
+              const sbTeacher = shuffledTeachers[teacherPtr % shuffledTeachers.length];
+              teacherPtr++;
+              if (sbTeacher && venueSegments.length > 0) {
+                const firstSeg = venueSegments.find(s => s !== null);
+                if (firstSeg) {
+                  firstSeg.assignments.push({ id: sbTeacher.id, code: sbTeacher.code, name: sbTeacher.full_name, teacher_type: sbTeacher.teacher_type, role: 'standby' });
+                }
               }
+
+              return venueSegments.filter(Boolean);
             }
+          });
+          localStorage.setItem('dutyguard_demo_generated_duties', JSON.stringify(storedDuties.filter(Boolean)));
+        }
 
-            return venueSegments.filter(Boolean);
-          }
+        setAllStaffList(teachers);
+        setDuties(storedDuties);
+        setRecentAudit(logs.slice(0, 5));
+        setStats({
+          staffCount: teachers.length,
+          venueCount: venues.length,
+          activeSessions: 5,
+          pendingSwaps: 7
         });
-        localStorage.setItem('dutyguard_demo_generated_duties', JSON.stringify(storedDuties.filter(Boolean)));
       }
-
-      setAllStaffList(teachers);
-      setDuties(storedDuties);
-      setRecentAudit(logs.slice(0, 5));
-      setStats({
-        staffCount: teachers.length,
-        venueCount: venues.length,
-        activeSessions: 5,
-        pendingSwaps: mockConflicts.length
-      });
+    } catch (err) {
+      console.error('Error in fetchAdminData:', err);
+    } finally {
+      if (initial) setIsLoading(false);
+      else setIsUpdating(false);
     }
-    
-    if (initial) setIsLoading(false);
-    else setIsUpdating(false);
   };
 
   const handleRunGenerator = async () => {

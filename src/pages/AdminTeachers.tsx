@@ -24,6 +24,7 @@ export function AdminTeachers() {
   const [allSubjects, setAllSubjects] = useState<any[]>([]); 
   const [loadingSubjects, setLoadingSubjects] = useState(false);
   const [loadingLeaves, setLoadingLeaves] = useState(false);
+  const [loadingRole, setLoadingRole] = useState(false);
   const [loadingBreak, setLoadingBreak] = useState(false);
   const [breakDuties, setBreakDuties] = useState<{ morning: string[], afternoon: string[] }>({ morning: [], afternoon: [] });
   const [newBreakDate, setNewBreakDate] = useState({ morning: '', afternoon: '' });
@@ -436,7 +437,7 @@ export function AdminTeachers() {
                     onClick={() => { setSelectedStaff(person); setRoleValue(person.role || 'Scattered'); setActiveModal('role'); }}
                     className="px-6 py-2 bg-slate-900 text-white rounded-xl font-black uppercase text-[10px] tracking-widest hover:bg-indigo-600 transition-all shadow-lg shadow-indigo-900/10 active:scale-95"
                   >
-                    Update/Save
+                    Role
                   </button>
                 </td>
               </tr>
@@ -457,49 +458,70 @@ export function AdminTeachers() {
           <Modal 
             isOpen={true} 
             onClose={() => setActiveModal(null)} 
-            title={`${selectedStaff.first_name} ${selectedStaff.last_name}`} 
-            subtitle={selectedStaff.staff_code}
+            title="Strategic Role Assignment" 
+            subtitle={`${selectedStaff.first_name} ${selectedStaff.last_name} (${selectedStaff.staff_code})`}
             footer={
               <div className="flex gap-4">
                 <button 
                   onClick={() => setActiveModal(null)}
-                  className="flex-1 py-4 bg-red-50 text-red-600 rounded-2xl font-black uppercase text-[11px] tracking-widest border border-red-100 hover:bg-red-100 transition-all flex items-center justify-center gap-2"
+                  className="flex-1 py-4 bg-slate-50 text-slate-500 rounded-2xl font-black uppercase text-[11px] tracking-widest border border-slate-100 hover:bg-slate-100 transition-all flex items-center justify-center gap-2"
                 >
                   <X className="h-4 w-4" /> Cancel
                 </button>
                 <button 
+                  disabled={loadingRole || !roleValue}
                   onClick={async () => {
-                    const { error } = await supabase
-                      .from('staff')
-                      .update({ role: roleValue })
-                      .eq('staff_code', selectedStaff.staff_code);
-                    
-                    if (!error) {
-                      setStaff(prev => prev.map(s => s.staff_code === selectedStaff.staff_code ? { ...s, role: roleValue } : s));
-                      setActiveModal(null);
+                    setLoadingRole(true);
+                    try {
+                      const { error } = await supabase
+                        .from('staff')
+                        .update({ role: roleValue })
+                        .eq('staff_code', selectedStaff.staff_code);
+                      
+                      if (!error) {
+                        setStaff(prev => prev.map(s => s.staff_code === selectedStaff.staff_code ? { ...s, role: roleValue } : s));
+                        setActiveModal(null);
+                      } else {
+                        throw error;
+                      }
+                    } catch (err) {
+                      console.error('Error updating role:', err);
+                      alert('Strategic role update failed.');
+                    } finally {
+                      setLoadingRole(false);
                     }
                   }}
-                  className="flex-1 py-4 bg-emerald-600 text-white rounded-2xl font-black uppercase text-[11px] tracking-widest hover:bg-emerald-700 shadow-xl shadow-emerald-200 transition-all flex items-center justify-center gap-2"
+                  className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black uppercase text-[11px] tracking-widest hover:bg-indigo-600 shadow-xl shadow-indigo-900/10 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  <Check className="h-4 w-4" /> Save Changes
+                  {loadingRole ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                  Save Changes
                 </button>
               </div>
             }
           >
             <div className="space-y-6">
               <div className="space-y-3">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-2">Deployment Role</label>
-                <select 
-                  value={roleValue}
-                  onChange={(e) => setRoleValue(e.target.value)}
-                  className="w-full h-16 px-8 bg-slate-50 border border-slate-100 rounded-[2rem] outline-none font-bold appearance-none cursor-pointer focus:border-indigo-300 transition-all"
-                >
-                  <option value="Scattered">Scattered</option>
-                  <option value="Marathon">Marathon</option>
-                  <option value="OPS">OPS</option>
-                  <option value="ADMIN">ADMIN</option>
-                </select>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-2 italic">Operational Designation</label>
+                <div className="relative group">
+                  <select 
+                    value={roleValue}
+                    onChange={(e) => setRoleValue(e.target.value)}
+                    className="w-full h-20 px-10 bg-slate-50 border border-slate-100 rounded-[2.5rem] outline-none font-black text-lg appearance-none cursor-pointer focus:border-indigo-300 transition-all shadow-inner uppercase italic tracking-tight"
+                  >
+                    <option value="" disabled>Select role...</option>
+                    <option value="Scattered">Scattered</option>
+                    <option value="Marathon">Marathon</option>
+                    <option value="OPS">OPS</option>
+                    <option value="ADMIN">ADMIN</option>
+                  </select>
+                  <div className="absolute right-8 top-1/2 -translate-y-1/2 pointer-events-none text-slate-300 group-hover:text-indigo-400 transition-colors">
+                    <Shield className="h-6 w-6" />
+                  </div>
+                </div>
               </div>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest text-center italic">
+                Updating this role affects tactical load balancing and deployment metrics.
+              </p>
             </div>
           </Modal>
         )}

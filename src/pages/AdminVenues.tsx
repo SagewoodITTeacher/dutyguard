@@ -19,34 +19,13 @@ export function AdminVenues() {
   }, []);
 
   async function fetchVenues() {
-    const isDemo = !!localStorage.getItem('dutyguard_demo_session');
-
     try {
       setLoading(true);
       
-      if (isDemo) {
-        await new Promise(resolve => setTimeout(resolve, 800)); // Simulate delay
-        setVenues([
-          { id: 'v1', name: 'Great Hall', type: 'Hall', capacity: 350 },
-          { id: 'v2', name: 'IT Lab 1', type: 'Lab', capacity: 40 },
-          { id: 'v3', name: 'Science Lab 4', type: 'Lab', capacity: 35 },
-          { id: 'v4', name: 'Sports Pavilion', type: 'Hall', capacity: 150 },
-          { id: 'v5', name: 'Room 12', type: 'Classroom', capacity: 30 },
-          { id: 'v6', name: 'Room 15', type: 'Classroom', capacity: 30 },
-          { id: 'v7', name: 'Art Studio', type: 'Specialist', capacity: 25 },
-          { id: 'v8', name: 'Library Annex', type: 'Specialist', capacity: 60 },
-          { id: 'v9', name: 'Music Block Hall', type: 'Hall', capacity: 80 },
-          { id: 'v10', name: 'Tech Lab 2', type: 'Lab', capacity: 35 },
-          { id: 'v11', name: 'Bio Lab 1', type: 'Lab', capacity: 30 },
-          { id: 'v12', name: 'Exam Hall B', type: 'Hall', capacity: 200 }
-        ]);
-        return;
-      }
-
       const { data, error } = await supabase
         .from('venues')
         .select('*')
-        .order('name');
+        .order('display_name');
       
       if (error) throw error;
       setVenues(data || []);
@@ -58,11 +37,11 @@ export function AdminVenues() {
   }
 
   const filteredVenues = venues.filter(v => 
-    v.name.toLowerCase().includes(search.toLowerCase()) ||
-    v.type?.toLowerCase().includes(search.toLowerCase())
+    v.display_name.toLowerCase().includes(search.toLowerCase()) ||
+    v.venue_type?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const labCount = venues.filter(v => v.type?.toLowerCase().includes('lab')).length;
+  const labCount = venues.filter(v => v.venue_type?.toLowerCase().includes('lab')).length;
 
   if (loading) {
      return (
@@ -147,30 +126,30 @@ export function AdminVenues() {
           </thead>
           <tbody className="divide-y divide-slate-50">
             {filteredVenues.map((v) => (
-              <tr key={v.id} className="group hover:bg-slate-50 transition-colors">
+              <tr key={v.venue_id} className="group hover:bg-slate-50 transition-colors">
                 <td className="px-10 py-7">
                   <div className="flex items-center gap-5">
                     <div className="h-12 w-12 bg-white rounded-2xl border border-slate-100 flex items-center justify-center text-slate-300 group-hover:bg-indigo-100 group-hover:text-indigo-600 transition-all group-hover:rotate-12 shadow-sm">
                       <MapPin className="h-6 w-6" />
                     </div>
                     <div>
-                        <span className="font-black text-slate-900 text-lg tracking-tight italic uppercase">{v.name}</span>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">UID: {v.id.slice(0, 8)}</p>
+                        <span className="font-black text-slate-900 text-lg tracking-tight italic uppercase">{v.display_name}</span>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">UID: {v.venue_id}</p>
                     </div>
                   </div>
                 </td>
                 <td className="px-6 py-7">
                   <span className={cn(
                     "px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest italic border",
-                    v.type === 'Hall' ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-amber-50 text-amber-700 border-amber-100'
+                    v.venue_type === 'Hall' ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-amber-50 text-amber-700 border-amber-100'
                   )}>
-                    {v.type}
+                    {v.venue_type || 'General'}
                   </span>
                 </td>
                 <td className="px-6 py-7">
                    <div className="flex items-center gap-3">
                       <Users className="h-4 w-4 text-slate-400" />
-                      <span className="text-sm font-black text-slate-600">{v.capacity} UNIT CAP</span>
+                      <span className="text-sm font-black text-slate-600">{v.capacity || 0} UNIT CAP</span>
                    </div>
                 </td>
                 <td className="px-6 py-7">

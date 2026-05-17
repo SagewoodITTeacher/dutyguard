@@ -84,6 +84,7 @@ export function AdminDashboard() {
   const [scheduleOptions, setScheduleOptions] = useState({
      startDate: new Date().toISOString().split('T')[0],
      endDate: new Date().toISOString().split('T')[0],
+     balanceThreshold: 70,
      respectHomeroom: true,
      techPriority: true
   });
@@ -351,7 +352,7 @@ export function AdminDashboard() {
         endDate: scheduleOptions.endDate,
         sessionType: isDateRange ? 'DateRange' : 'FullDay',
         autoApplyRebalancing: true,
-        balanceThreshold: 70,
+        balanceThreshold: scheduleOptions.balanceThreshold,
         onProgress: (message) => {
           console.log('[Scheduler Progress]:', message);
           setProgressMessages(prev => [...prev, message]);
@@ -1057,10 +1058,34 @@ export function AdminDashboard() {
                     </div>
                     <div className="space-y-4">
                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-2">End Optimization</label>
-                       <input type="date" value={scheduleOptions.endDate} onChange={e => setScheduleOptions({...scheduleOptions, endDate: e.target.value})} className="w-full h-16 px-8 bg-slate-50 border border-slate-100 rounded-[2rem] outline-none font-bold text-xs" />
-                    </div>
-                 </div>
-              </div>
+                        <input type="date" value={scheduleOptions.endDate} onChange={e => setScheduleOptions({...scheduleOptions, endDate: e.target.value})} className="w-full h-16 px-8 bg-slate-50 border border-slate-100 rounded-[2rem] outline-none font-bold text-xs" />
+                     </div>
+                  </div>
+
+               <div className="space-y-4 pt-6 border-t border-slate-100 px-2">
+                  <div className="flex justify-between items-end px-2">
+                     <div className="space-y-1">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Balance Threshold</label>
+                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-tight">
+                           Maximum Allowed Variance (minutes)
+                        </p>
+                     </div>
+                     <span className="text-xl font-black text-indigo-600 italic">{scheduleOptions.balanceThreshold}m</span>
+                  </div>
+                  <input 
+                     type="range" 
+                     min="30" 
+                     max="300" 
+                     step="10" 
+                     value={scheduleOptions.balanceThreshold} 
+                     onChange={e => setScheduleOptions({...scheduleOptions, balanceThreshold: parseInt(e.target.value)})} 
+                     className="w-full h-2 bg-slate-100 rounded-full appearance-none cursor-pointer accent-indigo-600" 
+                  />
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest pl-2 whitespace-normal italic text-slate-500">
+                     The system will try to keep the difference in total invigilation minutes between any two teachers below this value.
+                  </p>
+               </div>
+            </div>
               <div className="p-12 pt-8 flex gap-4">
                  <button onClick={() => setShowSchedulerModal(false)} className="flex-1 py-6 bg-slate-50 text-slate-400 rounded-[2rem] font-black uppercase text-[11px] tracking-widest border border-slate-100 hover:bg-slate-100 transition-all">Abort Execution</button>
                  <button onClick={handleRunGenerator} disabled={isGenerating} className="flex-[2] py-6 bg-slate-950 text-white rounded-[2rem] font-black uppercase text-[11px] tracking-[0.2em] hover:bg-indigo-600 transition-all flex items-center justify-center gap-3 shadow-2xl shadow-indigo-950/20">

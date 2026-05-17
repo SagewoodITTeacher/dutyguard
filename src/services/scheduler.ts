@@ -15,6 +15,28 @@ export interface StaffAvailability {
   conflicts: ConflictReason[];
 }
 
+export interface SessionAssignmentResult {
+  date: string;
+  session: 'morning' | 'afternoon';
+  assignments: {
+    slotId: number;
+    staffCode: string;
+    paperId: number;
+    period: string;
+  }[];
+  unfilledSlots: {
+    slotId: number;
+    paperId: number;
+    period: string;
+    reasons: string[];
+  }[];
+  summary: {
+    totalSlots: number;
+    filled: number;
+    unfilled: number;
+  };
+}
+
 export class SchedulerService {
   /**
    * Determine cycle and day of cycle for a given date.
@@ -203,6 +225,141 @@ export class SchedulerService {
         conflicts
       };
     });
+  }
+
+  /**
+   * Phase 2: Initial Slot Packing (One Session)
+   * Fills invigilation slots for a single session while respecting all Phase 1 conflicts.
+   */
+  static async generateInitialAssignmentsForSession(
+    date: string,
+    sessionType: 'Morning' | 'Afternoon'
+  ): Promise<SessionAssignmentResult> {
+    // 1. Fetch unfilled invigilation slots for this session
+    const { data: slots, error: slotsError } = await (supabase
+      .from('exam_duties') as any)
+      .select('*')
+      .eq('duty_date', date)
+      .eq('session_type', sessionType)
+      .eq('is_slot', true)
+      .eq('slot_type', 'invigilator')
+      .is('staff_code', null);
+
+    if (slotsError) throw slotsError;
+    if (!slots || slots.length === 0) {
+      return {
+        date,
+        session: sessionType.toLowerCase() as 'morning' | 'afternoon',
+        assignments: [],
+        unfilledSlots: [],
+        summary: { totalSlots: 0, filled: 0, unfilled: 0 }
+      };
+    }
+
+    const assignments: SessionAssignmentResult['assignments'] = [];
+    const unfilledSlots: SessionAssignmentResult['unfilledSlots'] = [];
+    
+    // To track assignments made *within* this generation pass
+    const teachersAssignedInSession = new Map<string, string[]>(); // staff_code -> periods[]
+
+    // 2. Process slots
+    // For now, we process them in the order they were returned
+    for (const slot of (slots as any[])) {
+      const period = slot.period_code || '';
+      
+      // Fetch paper and session info to get the grade
+      const { data: paper } = await supabase
+        .from('exam_papers')
+        .select(`
+          id,
+          exam_sessions (
+            grade
+          )
+        `)
+        .eq('id', slot.exam_paper_id || 0)
+        .single();
+
+      const grade = (paper as any)?.exam_sessions?.grade;
+
+      if (!paper || grade === undefined) {
+        unfilledSlots.push({
+          slotId: slot.id,
+          paperId: slot.exam_paper_id || 0,
+          period,
+          reasons: ['Paper or Session Grade info not found']
+        });
+        continue;
+      }
+
+      // Get availability for this specific slot
+      const availabilityResults = await this.getStaffAvailabilityForSlot({
+        date,
+        period,
+        grade,
+        paperId: paper.id
+      });
+
+      // Filter for those who are available AND haven't been assigned yet in this pass for THIS period
+      // Also check "Scattered" role consecutive period if we assigned them previously in this pass
+      const candidates = availabilityResults.filter(avail => {
+        if (!avail.isAvailable) return false;
+
+        const assignedPeriods = teachersAssignedInSession.get(avail.staff.staff_code) || [];
+        
+        // Already assigned to this period in this pass?
+        if (assignedPeriods.includes(period)) return false;
+
+        // Scattered role consecutive check within this pass
+        if (avail.staff.role === 'Scattered') {
+          const currentPeriodNum = parseInt(period.replace(/\D/g, ''));
+          const hasConsecutiveInPass = assignedPeriods.some(p => {
+            const pNum = parseInt(p.replace(/\D/g, ''));
+            return Math.abs(pNum - currentPeriodNum) === 1;
+          });
+          if (hasConsecutiveInPass) return false;
+        }
+
+        return true;
+      });
+
+      // Sort candidates by load_percentage (favor lighter loads first as a baseline)
+      candidates.sort((a, b) => (a.staff.load_percentage || 0) - (b.staff.load_percentage || 0));
+
+      if (candidates.length > 0) {
+        const selected = candidates[0].staff;
+        assignments.push({
+          slotId: slot.id,
+          staffCode: selected.staff_code,
+          paperId: paper.id,
+          period
+        });
+
+        // Update internal tracking
+        const currentAssigned = teachersAssignedInSession.get(selected.staff_code) || [];
+        teachersAssignedInSession.set(selected.staff_code, [...currentAssigned, period]);
+      } else {
+        // Collect reasons from the engine for why NO ONE was available
+        const reasons = [...new Set(availabilityResults.flatMap(a => a.conflicts.map(c => c.message)))];
+        unfilledSlots.push({
+          slotId: slot.id,
+          paperId: paper.id,
+          period,
+          reasons: reasons.length > 0 ? reasons : ['No eligible staff found after session-wide conflict check']
+        });
+      }
+    }
+
+    return {
+      date,
+      session: sessionType.toLowerCase() as 'morning' | 'afternoon',
+      assignments,
+      unfilledSlots,
+      summary: {
+        totalSlots: slots.length,
+        filled: assignments.length,
+        unfilled: unfilledSlots.length
+      }
+    };
   }
 
   /**

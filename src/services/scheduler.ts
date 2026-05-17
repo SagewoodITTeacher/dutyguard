@@ -104,6 +104,18 @@ export interface OptimiseFullDayResult {
   };
 }
 
+export interface OptimiseDateRangeResult {
+  startDate: string;
+  endDate: string;
+  days: OptimiseFullDayResult[];
+  summary: {
+    totalSlots: number;
+    filled: number;
+    unfilled: number;
+    techAssigned: number;
+  };
+}
+
 export interface ApplyProposalsResult {
   applied: { slotId: number; staffCode: string }[];
   rejected: { slotId: number; reason: string }[];
@@ -295,6 +307,48 @@ export class SchedulerService {
       date,
       morning,
       afternoon,
+      summary: {
+        totalSlots,
+        filled,
+        unfilled,
+        techAssigned
+      }
+    };
+  }
+
+  /**
+   * Phase 9: Multi-Day Orchestration
+   * Sequentially optimises a range of dates.
+   */
+  static async optimiseDateRange(
+    startDate: string,
+    endDate: string,
+    options: { autoApplyRebalancing?: boolean } = { autoApplyRebalancing: false }
+  ): Promise<OptimiseDateRangeResult> {
+    const days: OptimiseFullDayResult[] = [];
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    // Sequence ensures load spreads naturally across the range
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0];
+      const { isWeekend } = this.getCycleInfo(dateStr);
+      
+      if (isWeekend) continue;
+
+      const dayResult = await this.optimiseFullDay(dateStr, options);
+      days.push(dayResult);
+    }
+
+    const totalSlots = days.reduce((sum, d) => sum + d.summary.totalSlots, 0);
+    const filled = days.reduce((sum, d) => sum + d.summary.filled, 0);
+    const unfilled = days.reduce((sum, d) => sum + d.summary.unfilled, 0);
+    const techAssigned = days.reduce((sum, d) => sum + d.summary.techAssigned, 0);
+
+    return {
+      startDate,
+      endDate,
+      days,
       summary: {
         totalSlots,
         filled,

@@ -41,7 +41,130 @@ export interface SessionAssignmentResult {
   };
 }
 
+export interface TeacherWorkload {
+  staffCode: string;
+  fullName: string;
+  invigilationMinutes: number;
+  standbyMinutes: number;
+  techMinutes: number;
+  sessionCount: number;
+}
+
+export interface LoadImbalanceReport {
+  invigilation: {
+    avg: number;
+    min: number;
+    max: number;
+    stdDev: number;
+    range: number;
+  };
+  standby: {
+    avg: number;
+    min: number;
+    max: number;
+    stdDev: number;
+    range: number;
+  };
+  totalTeachers: number;
+}
+
 export class SchedulerService {
+  /**
+   * Phase 5a: Get comprehensive workload summary for all teachers
+   */
+  static async getTeacherWorkloadSummary(startDate?: string, endDate?: string): Promise<TeacherWorkload[]> {
+    let query = supabase
+      .from('exam_duties')
+      .select(`
+        staff_code,
+        duty_type,
+        staff (first_name, last_name),
+        exam_papers (duration_minutes)
+      `)
+      .not('staff_code', 'is', null);
+
+    if (startDate) query = query.gte('duty_date', startDate);
+    if (endDate) query = query.lte('duty_date', endDate);
+
+    const { data: duties, error } = await (query as any);
+    if (error) throw error;
+
+    const { data: allStaff } = await supabase.from('staff').select('staff_code, first_name, last_name');
+    
+    const summaryMap = new Map<string, TeacherWorkload>();
+
+    // Initialise all active staff
+    allStaff?.forEach(s => {
+      summaryMap.set(s.staff_code, {
+        staffCode: s.staff_code,
+        fullName: `${s.first_name} ${s.last_name}`,
+        invigilationMinutes: 0,
+        standbyMinutes: 0,
+        techMinutes: 0,
+        sessionCount: 0
+      });
+    });
+
+    duties?.forEach((d: any) => {
+      const workload = summaryMap.get(d.staff_code);
+      if (!workload) return;
+
+      const mins = d.exam_papers?.duration_minutes || 120; // Default to 2 hours if missing
+
+      if (d.duty_type === 'Invigilation') {
+        workload.invigilationMinutes += mins;
+      } else if (d.duty_type === 'Stand-By') {
+        workload.standbyMinutes += mins;
+      } else if (d.duty_type === 'Tech-Duty') {
+        workload.techMinutes += mins;
+      }
+      
+      workload.sessionCount += 1;
+    });
+
+    return Array.from(summaryMap.values());
+  }
+
+  /**
+   * Phase 5a: Get workload summary for a specific session
+   */
+  static async getSessionWorkloadSummary(date: string, sessionType: 'Morning' | 'Afternoon') {
+    const workloads = await this.getTeacherWorkloadSummary(date, date);
+    return workloads.filter(w => w.sessionCount > 0);
+  }
+
+  /**
+   * Phase 5a: Calculate load imbalance statistics
+   */
+  static async getLoadImbalanceReport(startDate?: string, endDate?: string): Promise<LoadImbalanceReport> {
+    const workloads = await this.getTeacherWorkloadSummary(startDate, endDate);
+    
+    const calculateStats = (data: number[]) => {
+      if (data.length === 0) return { avg: 0, min: 0, max: 0, stdDev: 0, range: 0 };
+      const sum = data.reduce((a, b) => a + b, 0);
+      const avg = sum / data.length;
+      const min = Math.min(...data);
+      const max = Math.max(...data);
+      const variance = data.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / data.length;
+      return {
+        avg: Math.round(avg),
+        min,
+        max,
+        stdDev: Math.round(Math.sqrt(variance)),
+        range: max - min
+      };
+    };
+
+    const invigData = workloads.map(w => w.invigilationMinutes);
+    const standbyData = workloads.map(w => w.standbyMinutes);
+
+    return {
+      invigilation: calculateStats(invigData),
+      standby: calculateStats(standbyData),
+      totalTeachers: workloads.length
+    };
+  }
+
   /**
    * Determine cycle and day of cycle for a given date.
    * Implementation depends on school calendar. Defaulting to a simple 5-day week cycle.

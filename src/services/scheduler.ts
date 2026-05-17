@@ -76,7 +76,187 @@ export interface RebalancingProposal {
   loadDifference: number;
 }
 
+export interface OptimiseSessionResult {
+  date: string;
+  session: 'Morning' | 'Afternoon';
+  tech: SessionAssignmentResult;
+  initial: SessionAssignmentResult;
+  rebalancing: {
+    proposals: RebalancingProposal[];
+    applied?: ApplyProposalsResult;
+  };
+  summary: {
+    totalSlots: number;
+    filled: number;
+    unfilled: number;
+  };
+}
+
+export interface ApplyProposalsResult {
+  applied: { slotId: number; staffCode: string }[];
+  rejected: { slotId: number; reason: string }[];
+  summary: {
+    totalProposals: number;
+    appliedCount: number;
+    rejectedCount: number;
+  };
+}
+
 export class SchedulerService {
+  /**
+   * Phase 6: Apply Approved Rebalancing Proposals
+   * Safely applies a list of approved rebalancing proposals after real-time re-validation.
+   */
+  static async applyApprovedProposals(proposals: RebalancingProposal[]): Promise<ApplyProposalsResult> {
+    const result: ApplyProposalsResult = {
+      applied: [],
+      rejected: [],
+      summary: {
+        totalProposals: proposals.length,
+        appliedCount: 0,
+        rejectedCount: 0
+      }
+    };
+
+    if (proposals.length === 0) return result;
+
+    for (const proposal of proposals) {
+      try {
+        // 1. Fetch current slot details for re-validation
+        const { data: duty, error: dutyError } = await (supabase
+          .from('exam_duties') as any)
+          .select(`
+            id,
+            duty_date,
+            period_code,
+            exam_paper_id,
+            duty_type,
+            slot_type
+          `)
+          .eq('id', proposal.slotId)
+          .single();
+
+        if (dutyError || !duty) {
+          result.rejected.push({ slotId: proposal.slotId, reason: 'Slot not found in database' });
+          continue;
+        }
+
+        // 2. Fetch paper/session details for grade info
+        const { data: paper } = await supabase
+          .from('exam_papers')
+          .select(`
+            id,
+            exam_sessions (grade)
+          `)
+          .eq('id', duty.exam_paper_id || 0)
+          .single();
+
+        const grade = (paper as any)?.exam_sessions?.grade;
+        if (!paper || grade === undefined) {
+          result.rejected.push({ slotId: proposal.slotId, reason: 'Grade info missing for paper' });
+          continue;
+        }
+
+        // 3. RE-VALIDATE: Use the conflict engine again
+        const availability = await this.getStaffAvailabilityForSlot({
+          date: duty.duty_date,
+          period: duty.period_code || '',
+          grade,
+          paperId: paper.id,
+          slotType: duty.slot_type as any
+        });
+
+        const targetStaff = availability.find(a => a.staff.staff_code === proposal.suggestedStaffCode);
+
+        if (!targetStaff) {
+          result.rejected.push({ slotId: proposal.slotId, reason: `Target staff (${proposal.suggestedStaffCode}) not found` });
+          continue;
+        }
+
+        if (!targetStaff.isAvailable) {
+          const conflictMessages = targetStaff.conflicts.map(c => c.message).join(', ');
+          result.rejected.push({ 
+            slotId: proposal.slotId, 
+            reason: `Validation failed: ${conflictMessages}` 
+          });
+          continue;
+        }
+
+        // 4. Update the duty assignment
+        const { error: updateError } = await supabase
+          .from('exam_duties')
+          .update({
+            staff_code: proposal.suggestedStaffCode,
+            notes: `REBALANCED: ${proposal.reason} (Applied: ${new Date().toISOString().split('T')[0]})`
+          })
+          .eq('id', proposal.slotId);
+
+        if (updateError) {
+          result.rejected.push({ slotId: proposal.slotId, reason: `Database update failed: ${updateError.message}` });
+        } else {
+          result.applied.push({ slotId: proposal.slotId, staffCode: proposal.suggestedStaffCode });
+        }
+
+      } catch (err: any) {
+        result.rejected.push({ slotId: proposal.slotId, reason: `Unexpected error: ${err.message}` });
+      }
+    }
+
+    result.summary.appliedCount = result.applied.length;
+    result.summary.rejectedCount = result.rejected.length;
+
+    return result;
+  }
+
+  /**
+   * Phase 7: Session Orchestrator
+   * Runs the complete scheduling flow for a single session in one call.
+   */
+  static async optimiseSession(
+    date: string,
+    sessionType: 'Morning' | 'Afternoon',
+    options: { autoApplyRebalancing?: boolean } = { autoApplyRebalancing: false }
+  ): Promise<OptimiseSessionResult> {
+    // 1. Assign TECH duties first (they have highest priority and block the full day)
+    const techResult = await this.assignTechDutyForSession(date, sessionType);
+    if (techResult.assignments.length > 0) {
+      await this.commitSessionAssignments(techResult);
+    }
+
+    // 2. Assign regular invigilators and stand-bys
+    const initialResult = await this.generateInitialAssignmentsForSession(date, sessionType);
+    if (initialResult.assignments.length > 0) {
+      await this.commitSessionAssignments(initialResult);
+    }
+
+    // 3. Propose rebalancing based on newly generated loads
+    const proposals = await this.proposeRebalancingSuggestions(date, sessionType);
+    
+    let rebalancingApplied: ApplyProposalsResult | undefined;
+    if (options.autoApplyRebalancing && proposals.length > 0) {
+      rebalancingApplied = await this.applyApprovedProposals(proposals);
+    }
+
+    const totalSlots = techResult.summary.totalSlots + initialResult.summary.totalSlots;
+    const filled = techResult.summary.filled + initialResult.summary.filled;
+    const unfilled = techResult.summary.unfilled + initialResult.summary.unfilled;
+
+    return {
+      date,
+      session: sessionType,
+      tech: techResult,
+      initial: initialResult,
+      rebalancing: {
+        proposals,
+        applied: rebalancingApplied
+      },
+      summary: {
+        totalSlots,
+        filled,
+        unfilled
+      }
+    };
+  }
   /**
    * Phase 5b: Propose rebalancing suggestions for a session.
    * Identifies over-burdened teachers and suggests available low-load replacements.

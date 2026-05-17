@@ -31,6 +31,25 @@ async function startServer() {
     }
   });
 
+  app.get("/api/scheduler/critical-report", async (req, res) => {
+    try {
+      const { date, sessionType, startDate, endDate } = req.query;
+      
+      if (startDate && endDate) {
+         const result = await SchedulerService.getCriticalSlotsRangeReport(startDate as string, endDate as string);
+         return res.json(result);
+      }
+
+      if (!date || !sessionType) {
+        return res.status(400).json({ error: "Either (startDate, endDate) or (date, sessionType) required" });
+      }
+      const result = await SchedulerService.getCriticalSlotsReport(date as string, sessionType as any);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

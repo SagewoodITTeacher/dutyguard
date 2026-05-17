@@ -26,6 +26,7 @@ import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { SchedulerService } from '../services/scheduler';
 import { ProgressPopup } from '../components/ProgressPopup';
+import { SystemEngine } from '../components/SystemEngine';
 
 // Period config for Zulu operational time
 const PERIOD_CONFIG: Record<string, { start: string, end: string }> = {
@@ -478,6 +479,8 @@ export function AdminDashboard() {
           </button>
         </div>
       </div>
+
+      <SystemEngine />
 
       <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-2xl transition-all group">
          <div className="flex justify-between items-center mb-8">

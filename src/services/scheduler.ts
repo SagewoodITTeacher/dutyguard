@@ -1588,4 +1588,36 @@ export class SchedulerService {
       status: "Availability engine operational"
     };
   }
+
+  /**
+   * Phase 14: System Engine Diagnostics
+   * 
+   * Returns a detailed report of unassigned slots with potential alternative staff.
+   */
+  static async getCriticalSlotsReport(date: string, sessionType: 'Morning' | 'Afternoon') {
+    const engine = new SchedulerEngine(date, sessionType);
+    await engine.loadContext();
+    return await engine.getCriticalSlotsReport();
+  }
+
+  static async getCriticalSlotsRangeReport(startDate: string, endDate: string) {
+    const report: any[] = [];
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0];
+      const dayOfWeek = d.getDay();
+      if (dayOfWeek === 0 || dayOfWeek === 6) continue;
+
+      const sessions: ('Morning' | 'Afternoon')[] = ['Morning', 'Afternoon'];
+      for (const session of sessions) {
+        const engine = new SchedulerEngine(dateStr, session);
+        await engine.loadContext();
+        const sessionReport = await engine.getCriticalSlotsReport();
+        report.push(...sessionReport);
+      }
+    }
+    return report;
+  }
 }

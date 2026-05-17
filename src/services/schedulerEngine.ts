@@ -387,4 +387,63 @@ export class SchedulerEngine {
           await supabase.from('exam_duties').insert(newRows);
       }
   }
+
+  async getCriticalSlotsReport() {
+    const { data: slots, error: slotsError } = await (supabase
+      .from('exam_duties') as any)
+      .select('*, exam_papers(duration_minutes, id, subject_code, exam_sessions(grade))')
+      .eq('duty_date', this.date)
+      .eq('session_type', this.sessionType)
+      .eq('is_slot', true)
+      .is('staff_code', null)
+      .order('duty_date', { ascending: true });
+
+    if (slotsError || !slots) return [];
+
+    const report = [];
+
+    for (const slot of slots) {
+      const paper = slot.exam_papers;
+      if (!paper) continue;
+
+      const alternatives = [];
+      const period = slot.period_code;
+
+      for (const staff of this.ctx.staff) {
+        const staffCode = staff.staff_code;
+        if (!staffCode) continue;
+
+        const assignedPeriods = this.ctx.assignedPeriodsByStaff.get(staffCode);
+        if (!assignedPeriods || !assignedPeriods.has(period)) continue;
+
+        // Use the existing validation logic
+        const check = this.isStaffAvailable(staffCode, period, paper.id, slot.slot_type, slot.venue_id);
+        
+        // If "Double Booking" is the ONLY reason, they are a solid swap candidate
+        if (!check.available && check.reasons.length === 1 && check.reasons[0].includes('Double Booking')) {
+           const { data: currentSlot } = await supabase
+             .from('exam_duties')
+             .select('id')
+             .eq('duty_date', this.date)
+             .eq('staff_code', staffCode)
+             .eq('period_code', period)
+             .limit(1)
+             .single();
+
+           alternatives.push({
+             staff_code: staffCode,
+             current_assignment_id: currentSlot?.id
+           });
+           if (alternatives.length >= 5) break;
+        }
+      }
+
+      report.push({
+        ...slot,
+        alternatives
+      });
+    }
+
+    return report;
+  }
 }

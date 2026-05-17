@@ -68,7 +68,109 @@ export interface LoadImbalanceReport {
   totalTeachers: number;
 }
 
+export interface RebalancingProposal {
+  slotId: number;
+  currentStaffCode: string;
+  suggestedStaffCode: string;
+  reason: string;
+  loadDifference: number;
+}
+
 export class SchedulerService {
+  /**
+   * Phase 5b: Propose rebalancing suggestions for a session.
+   * Identifies over-burdened teachers and suggests available low-load replacements.
+   */
+  static async proposeRebalancingSuggestions(
+    date: string,
+    sessionType: 'Morning' | 'Afternoon'
+  ): Promise<RebalancingProposal[]> {
+    // 1. Get current workloads and stats
+    const workloads = await this.getTeacherWorkloadSummary();
+    const stats = await this.getLoadImbalanceReport();
+    
+    // Thresholds for "overburdened" and "available for pick-up"
+    const highThreshold = stats.invigilation.avg + (stats.invigilation.stdDev * 0.5);
+    const lowThreshold = stats.invigilation.avg - (stats.invigilation.stdDev * 0.5);
+
+    // 2. Fetch assigned duties for this session
+    const { data: currentDuties, error } = await supabase
+      .from('exam_duties')
+      .select(`
+        id,
+        staff_code,
+        period_code,
+        exam_paper_id,
+        duty_type
+      `)
+      .eq('duty_date', date)
+      .eq('session_type', sessionType)
+      .not('staff_code', 'is', null);
+
+    if (error) throw error;
+    if (!currentDuties) return [];
+
+    const proposals: RebalancingProposal[] = [];
+
+    // 3. Analyze each duty
+    for (const duty of currentDuties) {
+      if (duty.duty_type === 'Tech-Duty') continue; // Skip Tech-Duty as per Phase 5a rules
+
+      const currentWorkload = workloads.find(w => w.staffCode === duty.staff_code);
+      if (!currentWorkload || currentWorkload.invigilationMinutes <= highThreshold) continue;
+
+      // This teacher is overburdened. Try to find a replacement.
+      // Fetch paper details for availability check
+      const { data: paper } = await supabase
+        .from('exam_papers')
+        .select(`
+          id,
+          exam_sessions (grade)
+        `)
+        .eq('id', duty.exam_paper_id || 0)
+        .single();
+
+      const grade = (paper as any)?.exam_sessions?.grade;
+      if (!paper || grade === undefined) continue;
+
+      const availability = await this.getStaffAvailabilityForSlot({
+        date,
+        period: duty.period_code || '',
+        grade,
+        paperId: paper.id,
+        slotType: duty.duty_type === 'Stand-By' ? 'standby' : 'invigilator'
+      });
+
+      // Filter for available teachers with low load
+      const candidates = availability
+        .filter(a => {
+          if (!a.isAvailable) return false;
+          const w = workloads.find(wl => wl.staffCode === a.staff.staff_code);
+          return w && w.invigilationMinutes < lowThreshold;
+        })
+        .sort((a, b) => {
+          const wA = workloads.find(wl => wl.staffCode === a.staff.staff_code)?.invigilationMinutes || 0;
+          const wB = workloads.find(wl => wl.staffCode === b.staff.staff_code)?.invigilationMinutes || 0;
+          return wA - wB;
+        });
+
+      if (candidates.length > 0) {
+        const bestCandidate = candidates[0].staff;
+        const candidateWorkload = workloads.find(w => w.staffCode === bestCandidate.staff_code)!;
+        
+        proposals.push({
+          slotId: duty.id,
+          currentStaffCode: duty.staff_code!,
+          suggestedStaffCode: bestCandidate.staff_code,
+          reason: `Workload Reduction: ${currentWorkload.fullName} (${currentWorkload.invigilationMinutes}m) -> ${bestCandidate.first_name} ${bestCandidate.last_name} (${candidateWorkload.invigilationMinutes}m)`,
+          loadDifference: currentWorkload.invigilationMinutes - candidateWorkload.invigilationMinutes
+        });
+      }
+    }
+
+    return proposals;
+  }
+
   /**
    * Phase 5a: Get comprehensive workload summary for all teachers
    */

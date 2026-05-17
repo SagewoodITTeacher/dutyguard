@@ -74,8 +74,9 @@ export class SchedulerService {
     grade: number;
     venueId?: number;
     paperId?: number;
+    slotType?: 'invigilator' | 'standby' | 'tech';
   }): Promise<StaffAvailability[]> {
-    const { date, period, grade, paperId } = params;
+    const { date, period, grade, paperId, slotType } = params;
     const { cycle, dayOfCycle } = this.getCycleInfo(date);
     const dateObj = new Date(date);
     const isBeforeMay29 = dateObj < new Date('2026-05-29');
@@ -223,6 +224,16 @@ export class SchedulerService {
         });
       }
 
+      // Rule 8: TECH Duty Block (Full Day)
+      // A teacher assigned to TECH duty today is blocked from all other duties
+      if (slotType !== 'tech' && techAssignmentMap.has(s.staff_code)) {
+        conflicts.push({
+          ruleId: 'TECH_DUTY_BLOCK',
+          message: 'Assigned to TECH duty today. Blocked from all other duties.',
+          severity: 'blocking'
+        });
+      }
+
       return {
         staff: s,
         isAvailable: conflicts.length === 0,
@@ -307,7 +318,8 @@ export class SchedulerService {
         date,
         period,
         grade,
-        paperId: paper.id
+        paperId: paper.id,
+        slotType
       });
 
       // Filter for those who are available AND haven't been assigned yet in this pass for THIS period
@@ -387,12 +399,158 @@ export class SchedulerService {
         staff_code: a.staffCode,
         duty_date: a.dutyDate,
         duty_type: a.dutyType,
-        notes: `AUTO-ASSIGNED PHASE 3 (${new Date().toISOString().split('T')[0]})`
+        notes: `AUTO-ASSIGNED PHASE 4 (${new Date().toISOString().split('T')[0]})`
       }))
     );
 
     if (error) throw error;
+    
+    // Also update tech_duty_assignment for tech slots
+    const techAssignments = result.assignments.filter(a => a.type === 'tech');
+    if (techAssignments.length > 0) {
+      const { error: techError } = await supabase.from('tech_duty_assignment').upsert(
+        techAssignments.map(a => ({
+          duty_date: a.dutyDate,
+          staff_code: a.staffCode,
+          exam_paper_id: a.paperId,
+          subject_code: null // Optional: should ideally resolve from paper
+        }))
+      );
+      if (techError) console.error('Error updating tech_duty_assignment:', techError);
+    }
+
     return { success: true, count: result.assignments.length };
+  }
+
+  /**
+   * Phase 4: TECH Duty Assignment
+   * Correctly assigns TECH duty teachers for a given session.
+   */
+  static async assignTechDutyForSession(
+    date: string,
+    sessionType: 'Morning' | 'Afternoon'
+  ): Promise<SessionAssignmentResult> {
+    // 1. Fetch ALL unfilled TECH slots for this session
+    const { data: slots, error: slotsError } = await (supabase
+      .from('exam_duties') as any)
+      .select('*')
+      .eq('duty_date', date)
+      .eq('session_type', sessionType)
+      .eq('is_slot', true)
+      .eq('slot_type', 'tech')
+      .is('staff_code', null);
+
+    if (slotsError) throw slotsError;
+    
+    // Fetch paper info for these slots
+    const paperIds = [...new Set(slots?.map(s => s.exam_paper_id).filter(id => id !== null))] as number[];
+    const { data: papers } = await supabase
+      .from('exam_papers')
+      .select(`
+        id,
+        subject_code,
+        paper_type,
+        exam_sessions (
+          grade
+        )
+      `)
+      .in('id', paperIds);
+
+    const { data: techDutySubjects } = await supabase
+      .from('tech_duty_subjects')
+      .select('*');
+
+    const techSubjectMap = new Map(techDutySubjects?.map(ts => [ts.subject_code, ts.staff_code]) || []);
+
+    const assignments: SessionAssignmentResult['assignments'] = [];
+    const unfilledSlots: SessionAssignmentResult['unfilledSlots'] = [];
+
+    if (!slots || slots.length === 0) {
+      return {
+        date,
+        session: sessionType.toLowerCase() as 'morning' | 'afternoon',
+        assignments: [],
+        unfilledSlots: [],
+        summary: { totalSlots: 0, filled: 0, unfilled: 0 }
+      };
+    }
+
+    for (const slot of (slots as any[])) {
+      const paper = papers?.find(p => p.id === slot.exam_paper_id);
+      const grade = (paper as any)?.exam_sessions?.grade;
+      const subjectCode = paper?.subject_code || '';
+      const period = slot.period_code || '';
+
+      if (!paper || grade === undefined) {
+        unfilledSlots.push({
+          slotId: slot.id,
+          paperId: slot.exam_paper_id || 0,
+          period,
+          type: 'tech',
+          reasons: ['Paper info not found']
+        });
+        continue;
+      }
+
+      // Check for pre-assigned tech teacher for this subject
+      const techStaffCode = techSubjectMap.get(subjectCode);
+
+      if (!techStaffCode) {
+        unfilledSlots.push({
+          slotId: slot.id,
+          paperId: paper.id,
+          period,
+          type: 'tech',
+          reasons: [`No primary TECH teacher mapped for subject ${subjectCode}`]
+        });
+        continue;
+      }
+
+      // Check availability for this teacher
+      const availabilityResults = await this.getStaffAvailabilityForSlot({
+        date,
+        period,
+        grade,
+        paperId: paper.id,
+        slotType: 'tech'
+      });
+
+      const teacherAvail = availabilityResults.find(a => a.staff.staff_code === techStaffCode);
+
+      if (teacherAvail && teacherAvail.isAvailable) {
+        assignments.push({
+          slotId: slot.id,
+          staffCode: techStaffCode,
+          paperId: paper.id,
+          period,
+          type: 'tech',
+          dutyDate: slot.duty_date,
+          dutyType: slot.duty_type
+        });
+      } else {
+        unfilledSlots.push({
+          slotId: slot.id,
+          paperId: paper.id,
+          period,
+          type: 'tech',
+          reasons: teacherAvail 
+            ? teacherAvail.conflicts.map(c => c.message)
+            : [`Assigned TECH teacher (${techStaffCode}) not found or fundamentally unavailable`]
+        });
+      }
+    }
+
+    return {
+      date,
+      session: sessionType.toLowerCase() as 'morning' | 'afternoon',
+      assignments,
+      unfilledSlots,
+      summary: {
+        totalSlots: slots.length,
+        filled: assignments.length,
+        unfilled: unfilledSlots.length
+      }
+    };
   }
 
   /**

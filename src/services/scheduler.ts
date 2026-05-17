@@ -126,10 +126,187 @@ export interface ApplyProposalsResult {
   };
 }
 
+export interface OptimisationOptions {
+  startDate: string;
+  endDate?: string;
+  sessionType?: 'Morning' | 'Afternoon' | 'FullDay' | 'DateRange';
+  autoApplyRebalancing?: boolean;
+}
+
+export type OptimisationResponse = 
+  | { type: 'session', result: OptimiseSessionResult }
+  | { type: 'fullDay', result: OptimiseFullDayResult }
+  | { type: 'dateRange', result: OptimiseDateRangeResult };
+
 export class SchedulerService {
   /**
+   * High-level entry point for the "Optimise" UI.
+   * Handles session, full day, or date range optimisation based on options.
+   * 
+   * @param options Configuration for the optimisation run
+   * @returns Detailed results of the optimisation pass
+   */
+  static async runOptimisation(options: OptimisationOptions): Promise<OptimisationResponse> {
+    const { startDate, endDate, sessionType = 'FullDay', autoApplyRebalancing = false } = options;
+
+    if (sessionType === 'DateRange') {
+      if (!endDate) throw new Error('endDate is required for DateRange optimisation');
+      const result = await this.optimiseDateRange(startDate, endDate, { autoApplyRebalancing });
+      return { type: 'dateRange', result };
+    }
+
+    if (sessionType === 'FullDay') {
+      const result = await this.optimiseFullDay(startDate, { autoApplyRebalancing });
+      return { type: 'fullDay', result };
+    }
+
+    if (sessionType === 'Morning' || sessionType === 'Afternoon') {
+      const result = await this.optimiseSession(startDate, sessionType, { autoApplyRebalancing });
+      return { type: 'session', result };
+    }
+
+    throw new Error(`Invalid sessionType: ${sessionType}`);
+  }
+
+  /**
+   * Safely clears auto-assigned duties for a given scope.
+   * Useful for "re-generating" assignments from scratch.
+   * 
+   * @param options Scope to clear (specific date, session, or range)
+   */
+  static async clearAssignments(options: { 
+    date?: string, 
+    sessionType?: 'Morning' | 'Afternoon', 
+    startDate?: string, 
+    endDate?: string 
+  }) {
+    let query = supabase.from('exam_duties').update({ staff_code: null, notes: null });
+
+    if (options.date) {
+      query = query.eq('duty_date', options.date);
+    }
+    if (options.sessionType) {
+      query = query.eq('session_type', options.sessionType);
+    }
+    if (options.startDate) {
+      query = query.gte('duty_date', options.startDate);
+    }
+    if (options.endDate) {
+      query = query.lte('duty_date', options.endDate);
+    }
+
+    // Only clear if confirmed or specifically targeted
+    if (!options.date && !options.startDate) {
+      throw new Error('Must specify at least a date or startDate to clear assignments');
+    }
+
+    const { error } = await query;
+    if (error) throw error;
+    return { success: true };
+  }
+
+  /**
+   * Phase 11: Get optimisation status for a date or session.
+   * Useful for showing status badges (e.g., "75% Filled") in the UI.
+   * 
+   * @param date Date to check
+   * @param sessionType Optional session filter
+   */
+  static async getOptimisationStatus(date: string, sessionType?: 'Morning' | 'Afternoon') {
+    let query = (supabase
+      .from('exam_duties') as any)
+      .select('staff_code', { count: 'exact' })
+      .eq('duty_date', date)
+      .eq('is_slot', true);
+
+    if (sessionType) {
+      query = query.eq('session_type', sessionType);
+    }
+
+    const { count: total, data: assignments, error } = await query;
+    if (error) throw error;
+
+    const totalSlots = total || 0;
+    const filledSlots = assignments?.filter(a => a.staff_code !== null).length || 0;
+    const percentComplete = totalSlots > 0 ? Math.round((filledSlots / totalSlots) * 100) : 0;
+    
+    let status: 'empty' | 'partial' | 'complete' = 'empty';
+    if (filledSlots === totalSlots && totalSlots > 0) status = 'complete';
+    else if (filledSlots > 0) status = 'partial';
+
+    return {
+      totalSlots,
+      filledSlots,
+      percentComplete,
+      status
+    };
+  }
+
+  /**
+   * Phase 11: Fetch current duty assignments grouped by teacher.
+   * Efficient for building individual workload and "My Schedule" views.
+   */
+  static async getAssignmentsByStaff(startDate: string, endDate: string) {
+    const { data: duties, error } = await supabase
+      .from('exam_duties')
+      .select(`
+        id,
+        duty_date,
+        session_type,
+        period_code,
+        duty_type,
+        staff_code,
+        venue_id,
+        exam_papers (
+          duration_minutes,
+          subject_code,
+          paper_type,
+          exam_sessions (grade)
+        )
+      `)
+      .gte('duty_date', startDate)
+      .lte('duty_date', endDate)
+      .not('staff_code', 'is', null);
+
+    if (error) throw error;
+    return duties;
+  }
+
+  /**
+   * Phase 11: Fetch all duties (assigned and unassigned) for a specific session.
+   * Useful for the main schedule grid in the UI.
+   * 
+   * @param date The date to fetch
+   * @param sessionType Morning or Afternoon
+   */
+  static async getCurrentSessionAssignments(date: string, sessionType: 'Morning' | 'Afternoon') {
+    const { data, error } = await supabase
+      .from('exam_duties')
+      .select(`
+        *,
+        staff (first_name, last_name),
+        exam_papers (
+          id,
+          subject_code,
+          paper_type,
+          duration_minutes,
+          exam_sessions (grade)
+        )
+      `)
+      .eq('duty_date', date)
+      .eq('session_type', sessionType);
+
+    if (error) throw error;
+    return data;
+  }
+
+  /**
    * Phase 6: Apply Approved Rebalancing Proposals
-   * Safely applies a list of approved rebalancing proposals after real-time re-validation.
+   * 
+   * Re-validates proposals against current data before updating the database.
+   * This is the final step in the rebalancing process.
+   * 
+   * @param proposals List of proposals to apply
    */
   static async applyApprovedProposals(proposals: RebalancingProposal[]): Promise<ApplyProposalsResult> {
     const result: ApplyProposalsResult = {
@@ -234,7 +411,9 @@ export class SchedulerService {
 
   /**
    * Phase 7: Session Orchestrator
+   * 
    * Runs the complete scheduling flow for a single session in one call.
+   * Sequence: Tech Duties -> Initial Packing -> (Optional) Rebalancing.
    */
   static async optimiseSession(
     date: string,
@@ -284,7 +463,9 @@ export class SchedulerService {
 
   /**
    * Phase 8: Full Day Orchestration
+   * 
    * Coordinates the optimisation of both Morning and Afternoon sessions for a given date.
+   * Ensures Morning assignments affect Afternoon availability (Day-level load tracking).
    */
   static async optimiseFullDay(
     date: string,
@@ -318,7 +499,9 @@ export class SchedulerService {
 
   /**
    * Phase 9: Multi-Day Orchestration
+   * 
    * Sequentially optimises a range of dates.
+   * Sequential processing allows teachers to be moved according to accumulating load.
    */
   static async optimiseDateRange(
     startDate: string,
@@ -359,7 +542,12 @@ export class SchedulerService {
   }
   /**
    * Phase 5b: Propose rebalancing suggestions for a session.
+   * 
    * Identifies over-burdened teachers and suggests available low-load replacements.
+   * Does NOT write to the database. Returns proposals for UI review.
+   * 
+   * @param date The date to analyze
+   * @param sessionType Morning or Afternoon
    */
   static async proposeRebalancingSuggestions(
     date: string,
@@ -452,7 +640,12 @@ export class SchedulerService {
   }
 
   /**
-   * Phase 5a: Get comprehensive workload summary for all teachers
+   * Phase 5a: Get comprehensive workload summary for all teachers.
+   * 
+   * Calculates total minutes for invigilation, standby, and tech duties.
+   * 
+   * @param startDate Optional start date for the range
+   * @param endDate Optional end date for the range
    */
   static async getTeacherWorkloadSummary(startDate?: string, endDate?: string): Promise<TeacherWorkload[]> {
     let query = supabase
@@ -571,7 +764,11 @@ export class SchedulerService {
 
   /**
    * Rule-based Availability Engine
-   * Answers: "Who is available for this slot and why/why not?"
+   * 
+   * Answers the critical question: "Who is available for this slot and why/why not?"
+   * Checks leaves, teaching timetables, break duties, and existing exam duties.
+   * 
+   * @param params Slot details including date, period, grade, and type.
    */
   static async getStaffAvailabilityForSlot(params: {
     date: string;
@@ -748,8 +945,13 @@ export class SchedulerService {
   }
 
   /**
-   * Phase 2: Initial Slot Packing (One Session)
-   * Fills invigilation slots for a single session while respecting all Phase 1 conflicts.
+   * Phase 2: Initial Slot Packing (One Session).
+   * 
+   * Fills invigilation slots for a single session while respecting all availability rules.
+   * Favours staff with lower existing loads.
+   * 
+   * @param date The date to process
+   * @param sessionType Morning or Afternoon
    */
   static async generateInitialAssignmentsForSession(
     date: string,

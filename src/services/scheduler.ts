@@ -27,6 +27,8 @@ export interface SessionAssignmentResult {
     type: 'invigilator' | 'standby' | 'tech';
     dutyDate: string;
     dutyType: string;
+    sessionId?: number;
+    isNew?: boolean;
   }[];
   unfilledSlots: {
     slotId: number;
@@ -965,11 +967,11 @@ export class SchedulerService {
     date: string;
     period: string; // e.g., 'P1'
     grade: number;
-    venueId?: number;
+    venueId?: string;
     paperId?: number;
     slotType?: 'invigilator' | 'standby' | 'tech';
   }): Promise<StaffAvailability[]> {
-    const { date, period, grade, paperId, slotType } = params;
+    const { date, period, grade, paperId, slotType, venueId } = params;
     const { cycle, dayOfCycle } = this.getCycleInfo(date);
     const dateObj = new Date(date);
     const isBeforeMay29 = dateObj < new Date('2026-05-29');
@@ -1014,7 +1016,7 @@ export class SchedulerService {
     });
 
     // 2. Evaluate each staff member
-    return staff.map(s => {
+    return staff.filter(s => !['AAAA', 'AAAB', 'AAAC', 'AAAD'].includes(s.staff_code)).map(s => {
       const conflicts: ConflictReason[] = [];
 
       // Rule 1: Leave conflicts
@@ -1075,6 +1077,17 @@ export class SchedulerService {
           conflicts.push({
             ruleId: 'SCATTERED_CONSECUTIVE',
             message: 'Scattered role cannot perform two consecutive periods',
+            severity: 'blocking'
+          });
+        }
+      }
+
+      // Rule 6: Hall Access Restrictions
+      if (venueId && (venueId === 'HALL' || venueId === 'Main Hall')) {
+        if (!s.hall_access) {
+          conflicts.push({
+            ruleId: 'HALL_ACCESS',
+            message: 'Staff member does not have Hall Access permission',
             severity: 'blocking'
           });
         }
@@ -1156,6 +1169,28 @@ export class SchedulerService {
     };
   }
 
+  static getOverlappingPeriods(sessionType: 'Morning' | 'Afternoon', durationMinutes: number) {
+    const startMinutes = sessionType === 'Morning' ? 8 * 60 + 20 : 13 * 60 + 20;
+    const endMinutes = startMinutes + durationMinutes;
+
+    const periods = [
+      { code: 'P1', s: 7*60+30, e: 8*60+30 },
+      { code: 'P2', s: 8*60+30, e: 9*60+30 },
+      { code: 'P3', s: 9*60+30, e: 10*60+30 },
+      { code: 'B1', s: 10*60+30, e: 11*60+0 },
+      { code: 'P4', s: 11*60+0, e: 12*60+0 },
+      { code: 'P5', s: 12*60+0, e: 13*60+0 },
+      { code: 'P6', s: 13*60+0, e: 14*60+0 },
+      { code: 'B2', s: 14*60+0, e: 14*60+30 },
+      { code: 'A1', s: 14*60+30, e: 15*60+30 },
+      { code: 'A2', s: 15*60+30, e: 16*60+30 },
+      { code: 'A3', s: 16*60+30, e: 17*60+30 }
+    ];
+
+    // Some teachers teach classes during those periods, exclude those? No, period codes overlap.
+    return periods.filter(p => startMinutes < p.e && endMinutes > p.s).map(p => p.code);
+  }
+
   /**
    * Phase 2: Initial Slot Packing (One Session).
    * 
@@ -1204,14 +1239,14 @@ export class SchedulerService {
     });
 
     for (const slot of sortedSlots) {
-      const period = slot.period_code || '';
+      const basePeriod = slot.period_code || '';
       const slotType = slot.slot_type as 'invigilator' | 'standby' | 'tech';
       
-      // Fetch paper and session info to get the grade
       const { data: paper } = await supabase
         .from('exam_papers')
         .select(`
           id,
+          duration_minutes,
           exam_sessions (
             grade
           )
@@ -1220,90 +1255,109 @@ export class SchedulerService {
         .single();
 
       const grade = (paper as any)?.exam_sessions?.grade;
+      const duration = paper?.duration_minutes || 120;
 
       if (!paper || grade === undefined) {
         unfilledSlots.push({
           slotId: slot.id,
           paperId: slot.exam_paper_id || 0,
-          period,
+          period: basePeriod,
           type: slotType,
           reasons: ['Paper or Session Grade info not found']
         });
         continue;
       }
 
-      // Get availability for this specific slot
-      const availabilityResults = await this.getStaffAvailabilityForSlot({
-        date,
-        period,
-        grade,
-        paperId: paper.id,
-        slotType
-      });
-
-      // Filter for those who are available AND haven't been assigned yet in this pass for THIS period
-      const candidates = availabilityResults.filter(avail => {
-        if (!avail.isAvailable) return false;
-
-        const assignedPeriods = teachersAssignedInSession.get(avail.staff.staff_code) || [];
-        
-        // Already assigned to this period in this pass?
-        if (assignedPeriods.includes(period)) return false;
-
-        // Scattered role consecutive check within this pass
-        if (avail.staff.role === 'Scattered') {
-          const currentPeriodNum = parseInt(period.replace(/\D/g, ''));
-          const hasConsecutiveInPass = assignedPeriods.some(p => {
-            const pNum = parseInt(p.replace(/\D/g, ''));
-            return Math.abs(pNum - currentPeriodNum) === 1;
-          });
-          if (hasConsecutiveInPass) return false;
-        }
-
-        return true;
-      });
-
-      // Sort candidates by load_percentage (favor lighter loads first)
-      candidates.sort((a, b) => (a.staff.load_percentage || 0) - (b.staff.load_percentage || 0));
-
-      if (candidates.length > 0) {
-        const selected = candidates[0].staff;
-        const venueId = slot.venue_id;
-
-        if (!venueId) {
-          unfilledSlots.push({
-            slotId: slot.id,
-            paperId: paper.id,
-            period,
-            type: slotType,
-            reasons: ['CRITICAL: No venue ID associated with this slot. Data integrity check failed.']
-          });
-          continue;
-        }
-
-        assignments.push({
-          slotId: slot.id,
-          staffCode: selected.staff_code,
-          venueId: venueId,
-          paperId: paper.id,
-          period,
-          type: slotType,
-          dutyDate: slot.duty_date,
-          dutyType: slot.duty_type
-        });
-
-        // Update internal tracking
-        const currentAssigned = teachersAssignedInSession.get(selected.staff_code) || [];
-        teachersAssignedInSession.set(selected.staff_code, [...currentAssigned, period]);
-      } else {
-        const reasons = [...new Set(availabilityResults.flatMap(a => a.conflicts.map(c => c.message)))];
+      const venueId = slot.venue_id;
+      if (!venueId) {
         unfilledSlots.push({
           slotId: slot.id,
           paperId: paper.id,
-          period,
+          period: basePeriod,
           type: slotType,
-          reasons: reasons.length > 0 ? reasons : ['No eligible staff found after session-wide conflict check']
+          reasons: ['CRITICAL: No venue ID associated with this slot. Data integrity check failed.']
         });
+        continue;
+      }
+
+      const targetPeriods = this.getOverlappingPeriods(sessionType, duration);
+      if (targetPeriods.length === 0) targetPeriods.push(basePeriod);
+
+      let preferredTeacherCode: string | null = null;
+
+      for (const p of targetPeriods) {
+        const isNew = p !== basePeriod;
+
+        // Get availability for this period
+        const availabilityResults = await this.getStaffAvailabilityForSlot({
+          date,
+          period: p,
+          grade,
+          paperId: paper.id,
+          slotType
+        });
+
+        // Filter valid candidates
+        let candidates = availabilityResults.filter(avail => {
+          if (!avail.isAvailable) return false;
+
+          const assignedPeriods = teachersAssignedInSession.get(avail.staff.staff_code) || [];
+          if (assignedPeriods.includes(p)) return false; // Already assigned this period
+
+          if (avail.staff.role === 'Scattered') {
+            const currentPeriodNum = parseInt(p.replace(/\D/g, ''));
+            const hasConsecutiveInPass = assignedPeriods.some(ap => {
+              const pNum = parseInt(ap.replace(/\D/g, ''));
+              return Math.abs(pNum - currentPeriodNum) === 1;
+            });
+            if (hasConsecutiveInPass) return false;
+          }
+
+          return true;
+        });
+
+        if (candidates.length > 0) {
+          // If we have a preferred teacher from the previous period (MARATHON intent), and they are valid for this period
+          const retainedCandidate = preferredTeacherCode ? candidates.find(c => c.staff.staff_code === preferredTeacherCode) : null;
+          
+          let selected;
+          if (retainedCandidate) {
+            selected = retainedCandidate.staff;
+          } else {
+            // Sort by load_percentage
+            candidates.sort((a, b) => (a.staff.load_percentage || 0) - (b.staff.load_percentage || 0));
+            selected = candidates[0].staff;
+          }
+
+          // Remember them for the next overlapping period
+          preferredTeacherCode = selected.staff_code;
+
+          assignments.push({
+            slotId: slot.id, // For isNew=true, this gets ignored / creates a new row with no ID collision since we use insert
+            staffCode: selected.staff_code,
+            venueId: venueId,
+            paperId: paper.id,
+            period: p,
+            type: slotType,
+            dutyDate: slot.duty_date,
+            dutyType: slot.duty_type,
+            sessionId: slot.exam_session_id,
+            isNew: isNew
+          });
+
+          const currentAssigned = teachersAssignedInSession.get(selected.staff_code) || [];
+          teachersAssignedInSession.set(selected.staff_code, [...currentAssigned, p]);
+        } else {
+          preferredTeacherCode = null; // Break the marathon chain if forced
+          const reasons = [...new Set(availabilityResults.flatMap(a => a.conflicts.map(c => c.message)))];
+          unfilledSlots.push({
+            slotId: slot.id,
+            paperId: paper.id,
+            period: p,
+            type: slotType,
+            reasons: reasons.length > 0 ? reasons : ['No eligible staff found after session-wide conflict check']
+          });
+        }
       }
     }
 
@@ -1326,15 +1380,34 @@ export class SchedulerService {
   static async commitSessionAssignments(result: SessionAssignmentResult) {
     if (result.assignments.length === 0) return { success: true, count: 0 };
 
-    const updatePromises = result.assignments.map(a => 
-      supabase.from('exam_duties').update({
-        staff_code: a.staffCode,
-        venue_id: a.venueId,
-        duty_date: a.dutyDate,
-        duty_type: a.dutyType,
-        notes: `AUTO-ASSIGNED scheduler engine reliable (${new Date().toLocaleDateString()})`
-      }).eq('id', a.slotId)
-    );
+    const updatePromises = result.assignments.map(a => {
+      if (a.isNew) {
+        const isAfternoon = a.period?.startsWith('A') || a.period?.startsWith('P6') || a.period?.startsWith('P7') || a.period === 'B2';
+        const sessionTypeVal = a.dutyType === 'Tech-Duty' ? 'Morning/Afternoon' : (isAfternoon ? 'Afternoon' : 'Morning');
+        
+        return supabase.from('exam_duties').insert({
+          staff_code: a.staffCode,
+          venue_id: a.venueId,
+          exam_paper_id: a.paperId,
+          exam_session_id: a.sessionId,
+          period_code: a.period,
+          duty_date: a.dutyDate,
+          duty_type: a.dutyType,
+          is_slot: true,
+          slot_type: a.type,
+          session_type: sessionTypeVal,
+          notes: `AUTO-ASSIGNED dynamically expanded (${new Date().toLocaleDateString()})`
+        });
+      } else {
+        return supabase.from('exam_duties').update({
+          staff_code: a.staffCode,
+          venue_id: a.venueId,
+          duty_date: a.dutyDate,
+          duty_type: a.dutyType,
+          notes: `AUTO-ASSIGNED scheduler engine reliable (${new Date().toLocaleDateString()})`
+        }).eq('id', a.slotId);
+      }
+    });
 
     const results = await Promise.all(updatePromises);
     
@@ -1388,6 +1461,7 @@ export class SchedulerService {
       .from('exam_papers')
       .select(`
         id,
+        duration_minutes,
         subject_code,
         paper_type,
         exam_sessions (
@@ -1419,13 +1493,14 @@ export class SchedulerService {
       const paper = papers?.find(p => p.id === slot.exam_paper_id);
       const grade = (paper as any)?.exam_sessions?.grade;
       const subjectCode = paper?.subject_code || '';
-      const period = slot.period_code || '';
+      const basePeriod = slot.period_code || '';
+      const duration = paper?.duration_minutes || 120;
 
       if (!paper || grade === undefined) {
         unfilledSlots.push({
           slotId: slot.id,
           paperId: slot.exam_paper_id || 0,
-          period,
+          period: basePeriod,
           type: 'tech',
           reasons: ['Paper info not found']
         });
@@ -1433,64 +1508,74 @@ export class SchedulerService {
       }
 
       // Check for pre-assigned tech teacher for this subject
-      const techStaffCode = techSubjectMap.get(subjectCode);
+      const techStaffCode = techSubjectMap.get(subjectCode) || slot.required_tech_staff_code;
 
       if (!techStaffCode) {
         unfilledSlots.push({
           slotId: slot.id,
           paperId: paper.id,
-          period,
+          period: basePeriod,
           type: 'tech',
           reasons: [`No primary TECH teacher mapped for subject ${subjectCode}`]
         });
         continue;
       }
 
-      // Check availability for this teacher
-      const availabilityResults = await this.getStaffAvailabilityForSlot({
-        date,
-        period,
-        grade,
-        paperId: paper.id,
-        slotType: 'tech'
-      });
+      const targetPeriods = this.getOverlappingPeriods(sessionType, duration);
+      if (targetPeriods.length === 0) targetPeriods.push(basePeriod);
 
-      const teacherAvail = availabilityResults.find(a => a.staff.staff_code === techStaffCode);
+      for (const p of targetPeriods) {
+        const isNew = p !== basePeriod;
 
-      if (teacherAvail && teacherAvail.isAvailable) {
-        const venueId = slot.venue_id;
-        
-        if (!venueId) {
+        // Check availability for this teacher
+        const availabilityResults = await this.getStaffAvailabilityForSlot({
+          date,
+          period: p,
+          grade,
+          paperId: paper.id,
+          slotType: 'tech'
+        });
+
+        const teacherAvail = availabilityResults.find(a => a.staff.staff_code === techStaffCode);
+
+        // Tech duty is forced if needed, but we check if completely blocked by leaves or something fundamental
+        if (teacherAvail && teacherAvail.isAvailable) {
+          const venueId = slot.venue_id;
+          
+          if (!venueId) {
+            unfilledSlots.push({
+              slotId: slot.id,
+              paperId: paper.id,
+              period: p,
+              type: 'tech',
+              reasons: ['CRITICAL: No venue ID associated with TECH slot.']
+            });
+            continue;
+          }
+
+          assignments.push({
+            slotId: slot.id,
+            staffCode: techStaffCode,
+            venueId: venueId,
+            paperId: paper.id,
+            period: p,
+            type: 'tech',
+            dutyDate: slot.duty_date,
+            dutyType: slot.duty_type,
+            sessionId: slot.exam_session_id,
+            isNew: isNew
+          });
+        } else {
           unfilledSlots.push({
             slotId: slot.id,
             paperId: paper.id,
-            period,
+            period: p,
             type: 'tech',
-            reasons: ['CRITICAL: No venue ID associated with TECH slot.']
+            reasons: teacherAvail 
+              ? teacherAvail.conflicts.map(c => c.message)
+              : [`Assigned TECH teacher (${techStaffCode}) not found or fundamentally unavailable`]
           });
-          continue;
         }
-
-        assignments.push({
-          slotId: slot.id,
-          staffCode: techStaffCode,
-          venueId: venueId,
-          paperId: paper.id,
-          period,
-          type: 'tech',
-          dutyDate: slot.duty_date,
-          dutyType: slot.duty_type
-        });
-      } else {
-        unfilledSlots.push({
-          slotId: slot.id,
-          paperId: paper.id,
-          period,
-          type: 'tech',
-          reasons: teacherAvail 
-            ? teacherAvail.conflicts.map(c => c.message)
-            : [`Assigned TECH teacher (${techStaffCode}) not found or fundamentally unavailable`]
-        });
       }
     }
 

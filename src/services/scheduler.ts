@@ -92,6 +92,18 @@ export interface OptimiseSessionResult {
   };
 }
 
+export interface OptimiseFullDayResult {
+  date: string;
+  morning: OptimiseSessionResult;
+  afternoon: OptimiseSessionResult;
+  summary: {
+    totalSlots: number;
+    filled: number;
+    unfilled: number;
+    techAssigned: number;
+  };
+}
+
 export interface ApplyProposalsResult {
   applied: { slotId: number; staffCode: string }[];
   rejected: { slotId: number; reason: string }[];
@@ -254,6 +266,40 @@ export class SchedulerService {
         totalSlots,
         filled,
         unfilled
+      }
+    };
+  }
+
+  /**
+   * Phase 8: Full Day Orchestration
+   * Coordinates the optimisation of both Morning and Afternoon sessions for a given date.
+   */
+  static async optimiseFullDay(
+    date: string,
+    options: { autoApplyRebalancing?: boolean } = { autoApplyRebalancing: false }
+  ): Promise<OptimiseFullDayResult> {
+    // 1. Optimise Morning Session
+    // We commit Morning before Afternoon starts so Afternoon can see Morning assignments
+    const morning = await this.optimiseSession(date, 'Morning', options);
+
+    // 2. Optimise Afternoon Session
+    // Afternoon will naturally avoid teachers assigned in Morning due to updated workload statistics
+    const afternoon = await this.optimiseSession(date, 'Afternoon', options);
+
+    const totalSlots = morning.summary.totalSlots + afternoon.summary.totalSlots;
+    const filled = morning.summary.filled + afternoon.summary.filled;
+    const unfilled = morning.summary.unfilled + afternoon.summary.unfilled;
+    const techAssigned = morning.tech.summary.filled + afternoon.tech.summary.filled;
+
+    return {
+      date,
+      morning,
+      afternoon,
+      summary: {
+        totalSlots,
+        filled,
+        unfilled,
+        techAssigned
       }
     };
   }

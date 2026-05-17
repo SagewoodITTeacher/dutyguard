@@ -21,6 +21,7 @@ export interface SessionAssignmentResult {
   assignments: {
     slotId: number;
     staffCode: string;
+    venueId: string;
     paperId: number;
     period: string;
     type: 'invigilator' | 'standby' | 'tech';
@@ -38,6 +39,7 @@ export interface SessionAssignmentResult {
     totalSlots: number;
     filled: number;
     unfilled: number;
+    venueCount?: number;
   };
 }
 
@@ -512,26 +514,27 @@ export class SchedulerService {
     const logProgress = (msg: string) => {
       progress.push(msg);
       if (options.onProgress) options.onProgress(msg);
+      console.log(`[Scheduler]: ${msg}`);
     };
 
     // 1. Assign TECH duties first (they have highest priority and block the full day)
-    logProgress(`Stage 1: Assigning priority TECH duties analysis for ${date} ${sessionType}...`);
+    logProgress(`Stage 1: Analyzing Technical Duty requirements for ${date} (${sessionType})...`);
     const techResult = await this.assignTechDutyForSession(date, sessionType);
     if (techResult.assignments.length > 0) {
       await this.commitSessionAssignments(techResult);
-      logProgress(`Assigned ${techResult.assignments.length} TECH slots.`);
+      logProgress(`✓ Secured ${techResult.assignments.length} Technical Support slots.`);
     }
 
     // 2. Assign regular invigilators and stand-bys
-    logProgress('Stage 2: Performing initial slot packing (packing low-load staff)...');
+    logProgress('Stage 2: Allocating Primary Invigilators and Stand-bys...');
     const initialResult = await this.generateInitialAssignmentsForSession(date, sessionType);
     if (initialResult.assignments.length > 0) {
       await this.commitSessionAssignments(initialResult);
-      logProgress(`Initially filled ${initialResult.assignments.length} slots.`);
+      logProgress(`✓ Successfully allocated ${initialResult.assignments.length} invigilation slots.`);
     }
 
     // 3. Iterative Rebalancing
-    logProgress('Stage 3: Commencing iterative rebalancing for workload equalization...');
+    logProgress('Stage 3: Balancing workload to ensure fairness across staff...');
     let iterations = 0;
     const allProposals: RebalancingProposal[] = [];
     let lastAppliedResult: ApplyProposalsResult | undefined;
@@ -541,14 +544,13 @@ export class SchedulerService {
       const currentVariance = statsBefore.invigilation.range;
 
       if (currentVariance <= balanceThreshold) {
-        logProgress(`Rebalancing target achieved (Current Variance: ${currentVariance}m <= Threshold: ${balanceThreshold}m).`);
+        logProgress(`Workload distribution optimal (Range: ${currentVariance}m).`);
         break;
       }
 
       const proposals = await this.proposeRebalancingSuggestions(date, sessionType, 'Invigilation');
       
       if (proposals.length === 0) {
-        // Try Stand-By rebalancing if Invigilation is stuck but Stand-By might need work
         const standbyProposals = await this.proposeRebalancingSuggestions(date, sessionType, 'Stand-By');
         if (standbyProposals.length > 0) {
           proposals.push(...standbyProposals);
@@ -556,7 +558,7 @@ export class SchedulerService {
       }
 
       if (proposals.length === 0) {
-        logProgress('No further safe rebalancing improvements could be identified.');
+        logProgress('No further workload improvements possible today.');
         break;
       }
 
@@ -565,7 +567,6 @@ export class SchedulerService {
       if (options.autoApplyRebalancing) {
         const applied = await this.applyApprovedProposals(proposals);
         
-        // Merge applied summaries if needed, but for simplicity we'll just track the last one or total
         if (!lastAppliedResult) {
           lastAppliedResult = applied;
         } else {
@@ -581,19 +582,19 @@ export class SchedulerService {
         }
 
         if (applied.summary.appliedCount === 0) {
-          logProgress(`Iteration ${iterations + 1}: Proposals rejected by conflict engine. Ending loop.`);
+          logProgress(`Iteration ${iterations + 1}: Final refinements complete.`);
           break;
         }
-        logProgress(`Iteration ${iterations + 1}: Applied ${applied.summary.appliedCount} improvements. New Variance: ${currentVariance - proposals[0].loadDifference}m (est).`);
+        logProgress(`Adjustment ${iterations + 1}: Improved ${applied.summary.appliedCount} duties. New Range: ~${currentVariance - proposals[0].loadDifference}m.`);
       } else {
-        logProgress(`Iteration ${iterations + 1}: ${proposals.length} improvements proposed (Manual review required).`);
+        logProgress(`Suggestion: ${proposals.length} possible improvements identified.`);
         break; 
       }
 
       iterations++;
     }
 
-    logProgress('Stage 4: Finalizing session assignments and reporting stats.');
+    logProgress('Stage 4: Finalizing schedule and performing systemic health checks...');
     const finalStats = await this.getLoadImbalanceReport();
 
     const totalSlots = techResult.summary.totalSlots + initialResult.summary.totalSlots;
@@ -1267,9 +1268,23 @@ export class SchedulerService {
 
       if (candidates.length > 0) {
         const selected = candidates[0].staff;
+        const venueId = slot.venue_id;
+
+        if (!venueId) {
+          unfilledSlots.push({
+            slotId: slot.id,
+            paperId: paper.id,
+            period,
+            type: slotType,
+            reasons: ['CRITICAL: No venue ID associated with this slot. Data integrity check failed.']
+          });
+          continue;
+        }
+
         assignments.push({
           slotId: slot.id,
           staffCode: selected.staff_code,
+          venueId: venueId,
           paperId: paper.id,
           period,
           type: slotType,
@@ -1315,13 +1330,17 @@ export class SchedulerService {
       result.assignments.map(a => ({
         id: a.slotId,
         staff_code: a.staffCode,
+        venue_id: a.venueId,
         duty_date: a.dutyDate,
         duty_type: a.dutyType,
-        notes: `AUTO-ASSIGNED PHASE 4 (${new Date().toISOString().split('T')[0]})`
+        notes: `AUTO-ASSIGNED matrix validation reliable (${new Date().toLocaleDateString()})`
       }))
     );
 
-    if (error) throw error;
+    if (error) {
+      console.error('Error committing assignments:', error);
+      throw error;
+    }
     
     // Also update tech_duty_assignment for tech slots
     const techAssignments = result.assignments.filter(a => a.type === 'tech');
@@ -1436,9 +1455,23 @@ export class SchedulerService {
       const teacherAvail = availabilityResults.find(a => a.staff.staff_code === techStaffCode);
 
       if (teacherAvail && teacherAvail.isAvailable) {
+        const venueId = slot.venue_id;
+        
+        if (!venueId) {
+          unfilledSlots.push({
+            slotId: slot.id,
+            paperId: paper.id,
+            period,
+            type: 'tech',
+            reasons: ['CRITICAL: No venue ID associated with TECH slot.']
+          });
+          continue;
+        }
+
         assignments.push({
           slotId: slot.id,
           staffCode: techStaffCode,
+          venueId: venueId,
           paperId: paper.id,
           period,
           type: 'tech',

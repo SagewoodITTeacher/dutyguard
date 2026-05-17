@@ -360,7 +360,20 @@ export function AdminDashboard() {
       });
 
       console.log('Optimisation Response:', response);
-      setProgressMessages(prev => [...prev, 'Deployment Matrix Optimized Successfully.']);
+      
+      let summaryText = 'Deployment Matrix Optimized Successfully.';
+      if (response.type === 'session') {
+        const r = response.result;
+        summaryText = `Optimization Complete: ${r.summary.filled}/${r.summary.totalSlots} slots filled. Final work variance is ${r.rebalancing.finalInvigVariance}m.`;
+      } else if (response.type === 'fullDay') {
+        const r = response.result;
+        summaryText = `Full Day Optimized: ${r.summary.filled}/${r.summary.totalSlots} slots secured. Total variance across staff is ${r.summary.finalInvigVariance}m.`;
+      } else if (response.type === 'dateRange') {
+        const r = response.result;
+        summaryText = `Multi-Day Range Complete: ${r.summary.filled}/${r.summary.totalSlots} slots allocated. Workload balanced to ${r.summary.finalInvigVariance}m variance.`;
+      }
+
+      setProgressMessages(prev => [...prev, summaryText]);
       setIsOptimisationComplete(true);
       (window as any).toast?.('Optimization Engine Matrix Complete', 'success');
       

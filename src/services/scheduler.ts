@@ -3,6 +3,8 @@ import { Database } from '../types/database';
 
 type Staff = Database['public']['Tables']['staff']['Row'];
 
+import { SchedulerEngine } from './schedulerEngine';
+
 export interface ConflictReason {
   ruleId: string;
   message: string;
@@ -520,7 +522,6 @@ export class SchedulerService {
     options: { autoApplyRebalancing?: boolean; balanceThreshold?: number, onProgress?: (m: string) => void } = { autoApplyRebalancing: false, balanceThreshold: 70 }
   ): Promise<OptimiseSessionResult> {
     const progress: string[] = [];
-    const balanceThreshold = options.balanceThreshold || 70;
 
     const logProgress = (msg: string) => {
       progress.push(msg);
@@ -528,107 +529,47 @@ export class SchedulerService {
       console.log(`[Scheduler]: ${msg}`);
     };
 
-    // 1. Assign TECH duties first (they have highest priority and block the full day)
-    logProgress(`Stage 1: Analyzing Technical Duty requirements for ${date} (${sessionType})...`);
-    const techResult = await this.assignTechDutyForSession(date, sessionType);
-    if (techResult.assignments.length > 0) {
-      await this.commitSessionAssignments(techResult);
-      logProgress(`✓ Secured ${techResult.assignments.length} Technical Support slots.`);
+    const engine = new SchedulerEngine(date, sessionType);
+    
+    logProgress(`Loading context and availability data for ${date}...`);
+    await engine.loadContext();
+
+    const { newAssignments, unfilled } = await engine.runPhase1Packing(logProgress);
+    
+    logProgress(`✓ Phase 1 complete. Assigned ${newAssignments.length} slots. Unfilled: ${unfilled.length}`);
+
+    const finalAssignments = await engine.runPhase2Balancing(newAssignments, logProgress);
+
+    if (finalAssignments.length > 0) {
+       await engine.commitToDatabase(finalAssignments);
     }
-
-    // 2. Assign regular invigilators and stand-bys
-    logProgress('Stage 2: Allocating Primary Invigilators and Stand-bys...');
-    const initialResult = await this.generateInitialAssignmentsForSession(date, sessionType);
-    if (initialResult.assignments.length > 0) {
-      await this.commitSessionAssignments(initialResult);
-      logProgress(`✓ Successfully allocated ${initialResult.assignments.length} invigilation slots.`);
-    }
-
-    // 3. Iterative Rebalancing
-    logProgress('Stage 3: Balancing workload to ensure fairness across staff...');
-    let iterations = 0;
-    const allProposals: RebalancingProposal[] = [];
-    let lastAppliedResult: ApplyProposalsResult | undefined;
-
-    while (iterations < 10) {
-      const statsBefore = await this.getLoadImbalanceReport();
-      const currentVariance = statsBefore.invigilation.range;
-
-      if (currentVariance <= balanceThreshold) {
-        logProgress(`Workload distribution optimal (Range: ${currentVariance}m).`);
-        break;
-      }
-
-      const proposals = await this.proposeRebalancingSuggestions(date, sessionType, 'Invigilation');
-      
-      if (proposals.length === 0) {
-        const standbyProposals = await this.proposeRebalancingSuggestions(date, sessionType, 'Stand-By');
-        if (standbyProposals.length > 0) {
-          proposals.push(...standbyProposals);
-        }
-      }
-
-      if (proposals.length === 0) {
-        logProgress('No further workload improvements possible today.');
-        break;
-      }
-
-      allProposals.push(...proposals);
-      
-      if (options.autoApplyRebalancing) {
-        const applied = await this.applyApprovedProposals(proposals);
-        
-        if (!lastAppliedResult) {
-          lastAppliedResult = applied;
-        } else {
-          lastAppliedResult = {
-            applied: [...lastAppliedResult.applied, ...applied.applied],
-            rejected: [...lastAppliedResult.rejected, ...applied.rejected],
-            summary: {
-              totalProposals: lastAppliedResult.summary.totalProposals + applied.summary.totalProposals,
-              appliedCount: lastAppliedResult.summary.appliedCount + applied.summary.appliedCount,
-              rejectedCount: lastAppliedResult.summary.rejectedCount + applied.summary.rejectedCount
-            }
-          };
-        }
-
-        if (applied.summary.appliedCount === 0) {
-          logProgress(`Iteration ${iterations + 1}: Final refinements complete.`);
-          break;
-        }
-        logProgress(`Adjustment ${iterations + 1}: Improved ${applied.summary.appliedCount} duties. New Range: ~${currentVariance - proposals[0].loadDifference}m.`);
-      } else {
-        logProgress(`Suggestion: ${proposals.length} possible improvements identified.`);
-        break; 
-      }
-
-      iterations++;
-    }
-
+    
     logProgress('Stage 4: Finalizing schedule and performing systemic health checks...');
-    const finalStats = await this.getLoadImbalanceReport();
-
-    const totalSlots = techResult.summary.totalSlots + initialResult.summary.totalSlots;
-    const filled = techResult.summary.filled + initialResult.summary.filled;
-    const unfilled = techResult.summary.unfilled + initialResult.summary.unfilled;
 
     return {
       date,
-      session: sessionType,
-      tech: techResult,
-      initial: initialResult,
-      rebalancing: {
-        proposals: allProposals,
-        applied: lastAppliedResult,
-        iterations,
-        finalInvigVariance: finalStats.invigilation.range,
-        finalStandbyVariance: finalStats.standby.range
+      session: sessionType.toLowerCase() as 'morning' | 'afternoon',
+      initial: {
+         date,
+         session: sessionType.toLowerCase() as 'morning' | 'afternoon',
+         assignments: finalAssignments,
+         unfilledSlots: unfilled,
+         summary: { totalSlots: newAssignments.length + unfilled.length, filled: newAssignments.length, unfilled: unfilled.length }
+      },
+      tech: {
+         date,
+         session: sessionType.toLowerCase() as 'morning' | 'afternoon',
+         assignments: [],
+         unfilledSlots: [],
+         summary: { totalSlots: 0, filled: 0, unfilled: 0 }
       },
       progress,
-      summary: {
-        totalSlots,
-        filled,
-        unfilled
+      summary: { totalSlots: newAssignments.length + unfilled.length, filled: newAssignments.length, unfilled: unfilled.length },
+      rebalancing: {
+         proposals: [],
+         iterations: 0,
+         finalInvigVariance: 0,
+         finalStandbyVariance: 0
       }
     };
   }

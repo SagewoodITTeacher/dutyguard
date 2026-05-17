@@ -1326,20 +1326,23 @@ export class SchedulerService {
   static async commitSessionAssignments(result: SessionAssignmentResult) {
     if (result.assignments.length === 0) return { success: true, count: 0 };
 
-    const { error } = await supabase.from('exam_duties').upsert(
-      result.assignments.map(a => ({
-        id: a.slotId,
+    const updatePromises = result.assignments.map(a => 
+      supabase.from('exam_duties').update({
         staff_code: a.staffCode,
         venue_id: a.venueId,
         duty_date: a.dutyDate,
         duty_type: a.dutyType,
-        notes: `AUTO-ASSIGNED matrix validation reliable (${new Date().toLocaleDateString()})`
-      }))
+        notes: `AUTO-ASSIGNED scheduler engine reliable (${new Date().toLocaleDateString()})`
+      }).eq('id', a.slotId)
     );
 
-    if (error) {
-      console.error('Error committing assignments:', error);
-      throw error;
+    const results = await Promise.all(updatePromises);
+    
+    // Check for any errors in the update batch
+    const errors = results.filter(r => r.error).map(r => r.error);
+    if (errors.length > 0) {
+      console.error('Error committing assignments:', errors);
+      throw errors[0];
     }
     
     // Also update tech_duty_assignment for tech slots

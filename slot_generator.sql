@@ -77,12 +77,14 @@ BEGIN
 
                     INSERT INTO exam_duties (
                         duty_date, exam_session_id, exam_paper_id,
-                        duty_type, venue_id,
+                        duty_type, venue_id, session_type, period_code,
                         is_slot, slot_type, slot_group_id, slot_index,
                         notes
                     ) VALUES (
                         v_date, v_session.id, v_paper.paper_id,
-                        'Invigilation', v_venue_id,
+                        'Invigilation', v_venue_id, 
+                        CASE WHEN v_session.session_type ILIKE '%Afternoon%' THEN 'Afternoon' ELSE 'Morning' END,
+                        CASE WHEN v_session.session_type ILIKE '%Afternoon%' THEN 'P6' ELSE 'P2' END,
                         true, 'invigilator', v_slot_group_id, v_slot_index,
                         'AUTO-SLOT v1.4'
                     );
@@ -91,12 +93,14 @@ BEGIN
                 -- === Create 1 Stand-By slot ===
                 INSERT INTO exam_duties (
                     duty_date, exam_session_id, exam_paper_id,
-                    duty_type, venue_id,
+                    duty_type, venue_id, session_type, period_code,
                     is_slot, slot_type, slot_group_id, slot_index,
                     notes
                 ) VALUES (
                     v_date, v_session.id, v_paper.paper_id,
-                    'Stand-By', v_venue_id,
+                    'Stand-By', v_venue_id, 
+                    CASE WHEN v_session.session_type ILIKE '%Afternoon%' THEN 'Afternoon' ELSE 'Morning' END,
+                    CASE WHEN v_session.session_type ILIKE '%Afternoon%' THEN 'P6' ELSE 'P2' END,
                     true, 'standby', v_slot_group_id, v_slot_index + 1,
                     'AUTO-SLOT v1.4 | STANDBY'
                 );
@@ -114,12 +118,14 @@ BEGIN
                     IF v_tech_staff_code IS NOT NULL THEN
                         INSERT INTO exam_duties (
                             duty_date, exam_session_id, exam_paper_id,
-                            duty_type, venue_id, staff_code,
+                            duty_type, venue_id, staff_code, session_type, period_code,
                             is_slot, slot_type, required_tech_staff_code,
                             slot_group_id, slot_index, notes
                         ) VALUES (
                             v_date, v_session.id, v_paper.paper_id,
                             'Tech-Duty', v_venue_id, v_tech_staff_code,
+                            CASE WHEN v_session.session_type ILIKE '%Afternoon%' THEN 'Afternoon' ELSE 'Morning' END,
+                            CASE WHEN v_session.session_type ILIKE '%Afternoon%' THEN 'P6' ELSE 'P2' END,
                             true, 'tech', v_tech_staff_code,
                             v_slot_group_id, v_slot_index + 2,
                             'AUTO-SLOT v1.4 | TECH PRE-ASSIGNED'

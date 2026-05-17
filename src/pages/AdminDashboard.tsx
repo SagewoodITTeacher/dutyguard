@@ -23,6 +23,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { Link } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
 import { SchedulerService } from '../services/scheduler';
 import { ProgressPopup } from '../components/ProgressPopup';
 
@@ -131,206 +132,203 @@ export function AdminDashboard() {
       if (initial) setIsLoading(true);
       else setIsUpdating(true);
 
-      const isDemo = localStorage.getItem('dutyguard_demo_session');
-      if (isDemo) {
-        let teachers = [];
-        try {
-          teachers = JSON.parse(localStorage.getItem('dutyguard_demo_teachers') || '[]');
-        } catch (e) { console.error("Parse teachers failed", e); }
-        
-        let venues = [];
-        try {
-          venues = JSON.parse(localStorage.getItem('dutyguard_demo_venues') || '[]');
-        } catch (e) { console.error("Parse venues failed", e); }
-        
-        // Fallback for demo if data is missing
-        if (teachers.length === 0) {
-          teachers = [
-            { id: '1', code: 'JOHD', full_name: 'John Doe', teacher_type: 'Marathon' },
-            { id: '2', code: 'FRAN', full_name: 'Fran Smith', teacher_type: 'Scattered' },
-            { id: '3', code: 'AMOP', full_name: 'Amos Opel', teacher_type: 'Marathon' },
-            { id: '4', code: 'LOGF', full_name: 'Logan Ford', teacher_type: 'Scattered' },
-            { id: '5', code: 'AYAM', full_name: 'Aya Mills', teacher_type: 'Marathon' },
-            { id: '6', code: 'SARH', full_name: 'Sarah Hill', teacher_type: 'Scattered' },
-            { id: '7', code: 'MICK', full_name: 'Mick Key', teacher_type: 'Marathon' },
-            { id: '8', code: 'BENJ', full_name: 'Ben Jonson', teacher_type: 'Scattered' },
-            { id: '9', code: 'CASE', full_name: 'Casey Case', teacher_type: 'Marathon' },
-            { id: '10', code: 'DANN', full_name: 'Danny Name', teacher_type: 'Scattered' },
-            { id: '11', code: 'ELIZ', full_name: 'Elizabeth Z', teacher_type: 'Marathon' },
-            { id: '12', code: 'FRED', full_name: 'Fred Red', teacher_type: 'Scattered' },
-            { id: '13', code: 'GEOR', full_name: 'George Green', teacher_type: 'Marathon' },
-            { id: '14', code: 'HOLL', full_name: 'Holly Wood', teacher_type: 'Scattered' },
-            { id: '15', code: 'IVAN', full_name: 'Ivan Terrible', teacher_type: 'Marathon' },
-            { id: '16', code: 'JACK', full_name: 'Jack Black', teacher_type: 'Scattered' },
-            { id: '17', code: 'KELL', full_name: 'Kelly Blue', teacher_type: 'Marathon' },
-            { id: '18', code: 'LIAM', full_name: 'Liam Neeson', teacher_type: 'Scattered' },
-            { id: '19', code: 'MONA', full_name: 'Mona Lisa', teacher_type: 'Marathon' },
-            { id: '20', code: 'NICK', full_name: 'Nick Fury', teacher_type: 'Scattered' },
-            { id: '21', code: 'OPRA', full_name: 'Oprah W', teacher_type: 'Marathon' },
-            { id: '22', code: 'PAUL', full_name: 'Paul Rudd', teacher_type: 'Scattered' },
-            { id: '23', code: 'QUIN', full_name: 'Quinton T', teacher_type: 'Marathon' },
-            { id: '24', code: 'ROSE', full_name: 'Rose Tyler', teacher_type: 'Scattered' },
-            { id: '25', code: 'SAMU', full_name: 'Samuel L', teacher_type: 'Marathon' },
-            { id: '26', code: 'TINA', full_name: 'Tina Fey', teacher_type: 'Scattered' },
-            { id: '27', code: 'URSU', full_name: 'Ursula K', teacher_type: 'Marathon' },
-            { id: '28', code: 'VICT', full_name: 'Victor Doom', teacher_type: 'Scattered' },
-            { id: '29', code: 'WILL', full_name: 'Will Smith', teacher_type: 'Marathon' },
-            { id: '30', code: 'XAVI', full_name: 'Xavier X', teacher_type: 'Scattered' },
-          ];
-          localStorage.setItem('dutyguard_demo_teachers', JSON.stringify(teachers));
-        }
-        
-        if (venues.length === 0) {
-          venues = [
-            { id: 'v1', name: 'Great Hall', type: 'Hall', capacity: 300 },
-            { id: 'v2', name: 'CAT_LAB 1', type: 'Lab', capacity: 26 },
-            { id: 'v3', name: 'IT_LAB 1', type: 'Lab', capacity: 26 },
-            { id: 'v4', name: 'LS_LAB 1', type: 'Lab', capacity: 30 },
-            { id: 'v5', name: 'Classroom 101', type: 'Class', capacity: 25 },
-            { id: 'v6', name: 'Classroom 102', type: 'Class', capacity: 25 },
-            { id: 'v7', name: 'Classroom 103', type: 'Class', capacity: 25 },
-            { id: 'v8', name: 'Classroom 104', type: 'Class', capacity: 25 },
-            { id: 'v9', name: 'Classroom 105', type: 'Class', capacity: 25 },
-            { id: 'v10', name: 'Classroom 106', type: 'Class', capacity: 25 },
-            { id: 'v11', name: 'Classroom 107', type: 'Class', capacity: 25 },
-            { id: 'v12', name: 'Classroom 108', type: 'Class', capacity: 25 },
-          ];
-          localStorage.setItem('dutyguard_demo_venues', JSON.stringify(venues));
-        }
+      // 1. Fetch Staff (for teacher types/roles)
+      const { data: staffData } = await supabase.from('staff').select('*');
+      const mappedStaff = (staffData || []).map(s => ({
+        ...s,
+        id: s.staff_code,
+        full_name: `${s.first_name} ${s.last_name}`
+      }));
+      const staffMap = new Map((mappedStaff).map(s => [s.staff_code, s]));
+      setAllStaffList(mappedStaff);
 
-        let storedDuties = [];
-        try {
-          storedDuties = JSON.parse(localStorage.getItem('dutyguard_demo_generated_duties') || '[]');
-        } catch (e) { storedDuties = []; }
-        
-        let logs = [];
-        try {
-          logs = JSON.parse(localStorage.getItem('dutyguard_demo_audit_logs') || '[]');
-        } catch (e) { logs = []; }
+      // 2. Fetch Venues (for stats)
+      const { data: venuesData } = await supabase.from('venues').select('*');
 
-        // Generate rich mock data for exactly 5 grades
-        if (storedDuties.length === 0 || initial) {
-          const mockSubjects = [
-            { name: 'Mathematics', canBePrac: false },
-            { name: 'English FAL', canBePrac: false },
-            { name: 'Physical Sciences', canBePrac: true },
-            { name: 'History', canBePrac: false },
-            { name: 'Accounting', canBePrac: false },
-            { name: 'CAT', canBePrac: true },
-            { name: 'Life Sciences', canBePrac: true },
-            { name: 'Afrikaans EAT', canBePrac: false },
-            { name: 'Physical Education', canBePrac: true }
-          ];
-          const grades = ['12', '11', '10', '9', '8'];
+      // 3. Fetch Swaps (for stats)
+      const { count: swapCount } = await supabase.from('duty_swaps').select('*', { count: 'exact', head: true }).eq('status', 'Pending');
+      
+      // 4. Fetch Audit Logs
+      const { data: auditLogs } = await supabase
+        .from('duty_audit_log')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(5);
+      
+      if (auditLogs) {
+        setRecentAudit(auditLogs.map(log => ({
+          id: log.id.toString(),
+          action: log.event_type,
+          description: log.details || '',
+          changed_at: log.created_at || new Date().toISOString()
+        })));
+      }
+
+      // 5. Fetch Duties for selected date and period
+      // Use the comprehensive view for easier grouping
+      let query = supabase.from('vw_full_schedule_grid').select('*');
+      
+      if (selectedDate) {
+        query = query.eq('duty_date', selectedDate);
+      }
+      
+      if (selectedPeriod !== 'ALL') {
+        query = query.eq('period_code', selectedPeriod);
+      }
+
+      const { data: gridData, error: gridError } = await query;
+      if (gridError) throw gridError;
+
+      // 6. Group by Segment (Grade + Venue logic)
+      const segments: any[] = [];
+      const rows = gridData || [];
+
+      // Group by Grade
+      const byGrade = rows.reduce((acc, row) => {
+        const grade = row.grade?.toString() || 'Unknown';
+        if (!acc[grade]) acc[grade] = [];
+        acc[grade].push(row);
+        return acc;
+      }, {} as Record<string, any[]>);
+
+      Object.entries(byGrade).forEach(([grade, gradeRows]) => {
+        const firstRow = gradeRows[0];
+        const isHallCase = grade === '12' && gradeRows.some(r => r.venue_type === 'Hall');
+        
+        // Extract common assignment types
+        const standbyAssignments = gradeRows
+          .filter(r => r.duty_type === 'Stand-By')
+          .map(r => ({
+            id: r.staff_code || `unassigned-sb-${r.duty_id}`,
+            dutyId: r.duty_id,
+            code: r.staff_code || '---',
+            name: r.staff_name || 'UNASSIGNED',
+            teacher_type: r.staff_code ? (staffMap.get(r.staff_code)?.role || 'Marathon') : 'None',
+            role: 'standby'
+          }));
           
-          let shuffledTeachers = [...teachers].sort(() => 0.5 - Math.random());
-          let teacherPtr = 0;
+        const techAssignments = gradeRows
+          .filter(r => r.duty_type === 'Tech-Duty')
+          .map(r => ({
+            id: r.staff_code || `unassigned-tech-${r.duty_id}`,
+            dutyId: r.duty_id,
+            code: r.staff_code || '---',
+            name: r.staff_name || 'UNASSIGNED',
+            teacher_type: r.staff_code ? (staffMap.get(r.staff_code)?.role || 'Marathon') : 'None',
+            role: 'tech'
+          }));
 
-          storedDuties = grades.flatMap(grade => {
-            const subjectObj = mockSubjects[Math.floor(Math.random() * mockSubjects.length)];
-            const isPrac = subjectObj.canBePrac && (subjectObj.name === 'CAT' || subjectObj.name === 'Life Sciences' || Math.random() > 0.5);
-            const paperType = isPrac ? 'Prac' : Math.random() > 0.5 ? 'P1' : 'P2';
-            const subject = subjectObj.name;
-            
-            let totalLearners = grade === '12' ? 120 + Math.floor(Math.random() * 60) : 60 + Math.floor(Math.random() * 60);
+        if (isHallCase) {
+          // Special Hall grouping for Grade 12
+          const hallRow = gradeRows.find(r => r.venue_type === 'Hall') || firstRow;
+          const allInvig = gradeRows
+            .filter(r => r.duty_type === 'Invigilation')
+            .map(r => ({
+              id: r.staff_code || `unassigned-inv-${r.duty_id}`,
+              dutyId: r.duty_id,
+              code: r.staff_code || '---',
+              name: r.staff_name || 'UNASSIGNED',
+              teacher_type: r.staff_code ? (staffMap.get(r.staff_code)?.role || 'Marathon') : 'None',
+              role: 'invigilator'
+            }));
 
-            if (grade === '12' && !isPrac) {
-              const teacherCount = Math.ceil(totalLearners / 30);
-              const hallVenue = venues.find((v: any) => v.type === 'Hall') || venues[0];
+          segments.push({
+            id: `hall-${grade}-${selectedDate}-${selectedPeriod}`,
+            date: selectedDate,
+            period: selectedPeriod,
+            grade,
+            subject: hallRow.subject_code || 'No Subject',
+            paper_type: hallRow.paper_type || 'P1',
+            learners_count: hallRow.total_learners || 0,
+            session: hallRow.start_time || '00:00',
+            duration_minutes: hallRow.duration_minutes || 120,
+            venues: {
+              id: hallRow.venue_id,
+              name: hallRow.venue_name,
+              type: hallRow.venue_type,
+              capacity: hallRow.capacity
+            },
+            assignments: [...allInvig, ...standbyAssignments],
+            tech_support: techAssignments
+          });
+        } else {
+          // Regular grouping by venue for other cases
+          const invigByVenue = gradeRows
+            .filter(r => r.duty_type === 'Invigilation')
+            .reduce((acc, r) => {
+              const vid = r.venue_id || 'unknown';
+              if (!acc[vid]) acc[vid] = [];
+              acc[vid].push(r);
+              return acc;
+            }, {} as Record<string, any[]>);
+
+          const venueIds = Object.keys(invigByVenue);
+          
+          if (venueIds.length === 0 && (standbyAssignments.length > 0 || techAssignments.length > 0)) {
+            // Has standby/tech but no invigilators - create a placeholder segment
+            segments.push({
+              id: `shell-${grade}-${selectedDate}-${selectedPeriod}`,
+              date: selectedDate,
+              period: selectedPeriod,
+              grade,
+              subject: firstRow.subject_code || 'N/A',
+              paper_type: firstRow.paper_type || 'P1',
+              learners_count: firstRow.total_learners || 0,
+              session: firstRow.start_time || '00:00',
+              duration_minutes: firstRow.duration_minutes || 120,
+              venues: { id: 'shell', name: 'Assigned Units', type: 'Class', capacity: 0 },
+              assignments: standbyAssignments,
+              tech_support: techAssignments
+            });
+          } else {
+            venueIds.forEach((vid, idx) => {
+              const vRows = invigByVenue[vid];
+              const vFirst = vRows[0];
+              const venueAssignments = vRows
+                .map(r => ({
+                  id: r.staff_code || `unassigned-inv-${r.duty_id}`,
+                  dutyId: r.duty_id,
+                  code: r.staff_code || '---',
+                  name: r.staff_name || 'UNASSIGNED',
+                  teacher_type: r.staff_code ? (staffMap.get(r.staff_code)?.role || 'Marathon') : 'None',
+                  role: 'invigilator'
+                }));
               
-              const assignedTeachers = [];
-              for (let i = 0; i < teacherCount; i++) {
-                const t = shuffledTeachers[teacherPtr % shuffledTeachers.length];
-                teacherPtr++;
-                assignedTeachers.push({
-                  id: t.id,
-                  code: t.code,
-                  name: t.full_name,
-                  teacher_type: t.teacher_type,
-                  role: i === teacherCount - 1 ? 'standby' : 'invigilator'
-                });
-              }
-
-              return [{
-                id: `demo-${grade}-${selectedDate}-${selectedPeriod}`,
+              segments.push({
+                id: `venue-${grade}-${vid}-${selectedDate}-${selectedPeriod}`,
                 date: selectedDate,
                 period: selectedPeriod,
                 grade,
-                subject,
-                paper_type: paperType,
-                learners_count: totalLearners,
-                session: PERIOD_CONFIG[selectedPeriod].start,
-                duration_minutes: 120,
-                venues: hallVenue,
-                assignments: assignedTeachers
-              }];
-            } else {
-              const capacity = isPrac ? 26 : 25;
-              const venueCount = Math.min(Math.ceil(totalLearners / capacity), 5); 
-
-              const venueSegments = Array.from({ length: venueCount }).map((_, i) => {
-                const venueType = isPrac ? 'Lab' : 'Class';
-                const venue = venues.find((v: any) => v.type === venueType && v.capacity >= capacity && !storedDuties.some((sd:any) => sd.venues?.id === v.id)) || venues[i + 4] || venues[0];
-                const t = shuffledTeachers[teacherPtr % shuffledTeachers.length];
-                teacherPtr++;
-                
-                if (!t) return null;
-
-                const assignments = [{
-                  id: t.id,
-                  code: t.code,
-                  name: t.full_name,
-                  teacher_type: t.teacher_type,
-                  role: 'invigilator'
-                }];
-
-                return {
-                  id: `demo-${grade}-${i}-${selectedDate}-${selectedPeriod}`,
-                  date: selectedDate,
-                  period: selectedPeriod,
-                  grade,
-                  subject,
-                  paper_type: paperType,
-                  learners_count: Math.min(capacity, totalLearners - (i * capacity)),
-                  session: PERIOD_CONFIG[selectedPeriod].start,
-                  duration_minutes: 90,
-                  venues: venue,
-                  assignments: assignments,
-                  tech_support: isPrac && i === 0 ? [
-                    shuffledTeachers[teacherPtr % shuffledTeachers.length],
-                    shuffledTeachers[(teacherPtr + 1) % shuffledTeachers.length]
-                  ].map(tt => {
-                    teacherPtr++;
-                    return { id: tt.id, code: tt.code, name: tt.full_name, role: 'tech', teacher_type: tt.teacher_type };
-                  }) : []
-                };
+                subject: vFirst.subject_code || 'N/A',
+                paper_type: vFirst.paper_type || 'P1',
+                learners_count: vFirst.total_learners || 0,
+                session: vFirst.start_time || '00:00',
+                duration_minutes: vFirst.duration_minutes || 120,
+                venues: {
+                  id: vFirst.venue_id,
+                  name: vFirst.venue_name,
+                  type: vFirst.venue_type,
+                  capacity: vFirst.capacity
+                },
+                assignments: idx === 0 ? [...venueAssignments, ...standbyAssignments] : venueAssignments,
+                tech_support: idx === 0 ? techAssignments : []
               });
-
-              const sbTeacher = shuffledTeachers[teacherPtr % shuffledTeachers.length];
-              teacherPtr++;
-              if (sbTeacher && venueSegments.length > 0) {
-                const firstSeg = venueSegments.find(s => s !== null);
-                if (firstSeg) {
-                  firstSeg.assignments.push({ id: sbTeacher.id, code: sbTeacher.code, name: sbTeacher.full_name, teacher_type: sbTeacher.teacher_type, role: 'standby' });
-                }
-              }
-
-              return venueSegments.filter(Boolean);
-            }
-          });
-          localStorage.setItem('dutyguard_demo_generated_duties', JSON.stringify(storedDuties.filter(Boolean)));
+            });
+          }
         }
+      });
 
-        setAllStaffList(teachers);
-        setDuties(storedDuties);
-        setRecentAudit(logs.slice(0, 5));
-        setStats({
-          staffCount: teachers.length,
-          venueCount: venues.length,
-          activeSessions: 5,
-          pendingSwaps: 7
-        });
-      }
+      setDuties(segments);
+      
+      // 7. Update Stats
+      const distinctPapers = new Set(rows.map(r => r.subject_code)).size;
+      setStats({
+        staffCount: staffData?.length || 0,
+        venueCount: venuesData?.length || 0,
+        activeSessions: distinctPapers,
+        pendingSwaps: swapCount || 0
+      });
+
     } catch (err) {
       console.error('Error in fetchAdminData:', err);
     } finally {
@@ -950,22 +948,35 @@ export function AdminDashboard() {
                       <button onClick={() => { setShowOpsModal(false); setSelectedReplacementId(null); }} className="flex-1 py-6 bg-slate-50 text-slate-500 rounded-[2rem] font-black uppercase text-[11px] tracking-widest border border-slate-100 hover:bg-slate-100 transition-all">Cancel</button>
                       <button 
                         disabled={!selectedReplacementId}
-                        onClick={() => {
+                        onClick={async () => {
                           const teacher = allStaffList.find(t => t?.id === selectedReplacementId);
                           if (teacher && activeDutyForSwap) {
-                             const updated = duties.map(d => {
-                               if (d.id === activeDutyForSwap.id) {
-                                  const na = [...(d.assignments || [])];
-                                  na[swappingAssignmentIndex ?? 0] = { ...na[swappingAssignmentIndex ?? 0], id: teacher.id, code: teacher.code, name: teacher.full_name, teacher_type: teacher.teacher_type };
-                                  return { ...d, assignments: na };
+                             try {
+                               setIsUpdating(true);
+                               const currentAssignment = activeDutyForSwap.assignments?.[swappingAssignmentIndex ?? 0];
+                               // If it's a real duty with an ID, update the DB
+                               if (currentAssignment?.dutyId) {
+                                 const { error } = await supabase
+                                   .from('exam_duties')
+                                   .update({ 
+                                      staff_code: teacher.staff_code,
+                                      notes: `Manual swap via Control Matrix (${new Date().toLocaleDateString()})`
+                                   })
+                                   .eq('id', currentAssignment.dutyId);
+                                 
+                                 if (error) throw error;
                                }
-                               return d;
-                             });
-                             setDuties(updated);
-                             localStorage.setItem('dutyguard_demo_generated_duties', JSON.stringify(updated));
-                             (window as any).toast?.(`Unit ${teacher.code} Deployed Successfully`, 'success');
-                             setShowOpsModal(false);
-                             setSelectedReplacementId(null);
+                               
+                               (window as any).toast?.(`Unit ${teacher.code} Deployed Successfully`, 'success');
+                               fetchAdminData(); // Re-fetch all data to show update
+                               setShowOpsModal(false);
+                               setSelectedReplacementId(null);
+                             } catch (err: any) {
+                               console.error('Swap failed:', err);
+                               (window as any).toast?.(`Swap Failed: ${err.message}`, 'error');
+                             } finally {
+                               setIsUpdating(false);
+                             }
                           }
                         }}
                         className={cn(

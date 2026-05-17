@@ -20,7 +20,7 @@ export interface SessionAssignmentResult {
   session: 'morning' | 'afternoon';
   assignments: {
     slotId: number;
-    staffCode: string;
+    staffCode: string | null;
     venueId: string;
     paperId: number;
     period: string;
@@ -194,6 +194,20 @@ export class SchedulerService {
     startDate?: string, 
     endDate?: string 
   }) {
+    if (!options.date && !options.startDate) {
+      throw new Error('Must specify at least a date or startDate to clear assignments');
+    }
+
+    // 1. Completely delete any duty slots that were dynamically expanded
+    let deleteQuery = supabase.from('exam_duties').delete().like('notes', '%dynamically expanded%');
+    if (options.date) deleteQuery = deleteQuery.eq('duty_date', options.date);
+    if (options.sessionType) deleteQuery = deleteQuery.eq('session_type', options.sessionType);
+    if (options.startDate) deleteQuery = deleteQuery.gte('duty_date', options.startDate);
+    if (options.endDate) deleteQuery = deleteQuery.lte('duty_date', options.endDate);
+    
+    await deleteQuery;
+
+    // 2. Set staff_code to null for the base auto-generated slots
     let query = supabase.from('exam_duties').update({ staff_code: null, notes: null });
 
     if (options.date) {
@@ -207,11 +221,6 @@ export class SchedulerService {
     }
     if (options.endDate) {
       query = query.lte('duty_date', options.endDate);
-    }
-
-    // Only clear if confirmed or specifically targeted
-    if (!options.date && !options.startDate) {
-      throw new Error('Must specify at least a date or startDate to clear assignments');
     }
 
     const { error } = await query;
@@ -1016,7 +1025,7 @@ export class SchedulerService {
     });
 
     // 2. Evaluate each staff member
-    return staff.filter(s => !['AAAA', 'AAAB', 'AAAC', 'AAAD'].includes(s.staff_code)).map(s => {
+    return staff.filter(s => !['AAAA', 'AAAB', 'AAAC', 'AAAD'].includes(s.staff_code) && (s.load_percentage || 0) > 0).map(s => {
       const conflicts: ConflictReason[] = [];
 
       // Rule 1: Leave conflicts
@@ -1038,16 +1047,22 @@ export class SchedulerService {
         });
       }
 
-      // Rule 3: Gr 8/9 Teaching Conflict (Until 29 May)
-      if (isBeforeMay29 && (grade === 8 || grade === 9)) {
-        const teaching = teachingMap.get(s.staff_code);
-        if (teaching) {
+      // Rule 3: Teaching Conflict (Gr 8/9 until 29 May, free otherwise)
+      const teaching = teachingMap.get(s.staff_code);
+      if (teaching && teaching.class_code) {
+        // Parse the class_code to figure out the grade being taught
+        const isTeaching8Or9 = teaching.class_code.includes('8') || teaching.class_code.includes('9');
+        
+        if (isBeforeMay29 && isTeaching8Or9) {
           conflicts.push({
             ruleId: 'TEACHING_89',
-            message: `Teaching ${teaching.class_code} in this period (8/9 rule applies until May 29)`,
+            message: `Teaching Gr 8/9 class (${teaching.class_code}) in this period. Blocked until May 29.`,
             severity: 'blocking'
           });
         }
+        // If they teach 10, 11, 12, they are "Available" so we do nothing here, which means no conflict added for doing invigilation!
+        // Note: The rule says "Empty slots -> Free -> Can be used". "10,11,12 -> Available -> Can be used".
+        // So the only teaching-timetable-based block is if they teach 8 or 9 before May 29.
       }
 
       // Rule 4: Gr 12 Subject Conflict
@@ -1357,6 +1372,21 @@ export class SchedulerService {
             type: slotType,
             reasons: reasons.length > 0 ? reasons : ['No eligible staff found after session-wide conflict check']
           });
+          
+          if (isNew) {
+            assignments.push({
+              slotId: slot.id,
+              staffCode: null, // Will create an explicit null record
+              venueId: venueId,
+              paperId: paper.id,
+              period: p,
+              type: slotType,
+              dutyDate: slot.duty_date,
+              dutyType: slot.duty_type,
+              sessionId: slot.exam_session_id,
+              isNew: isNew
+            });
+          }
         }
       }
     }
@@ -1575,6 +1605,21 @@ export class SchedulerService {
               ? teacherAvail.conflicts.map(c => c.message)
               : [`Assigned TECH teacher (${techStaffCode}) not found or fundamentally unavailable`]
           });
+          
+          if (isNew) {
+            assignments.push({
+              slotId: slot.id,
+              staffCode: null,
+              venueId: slot.venue_id || '',
+              paperId: paper.id,
+              period: p,
+              type: 'tech',
+              dutyDate: slot.duty_date,
+              dutyType: slot.duty_type,
+              sessionId: slot.exam_session_id,
+              isNew: isNew
+            });
+          }
         }
       }
     }

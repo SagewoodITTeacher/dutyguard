@@ -23,11 +23,15 @@ export interface SessionAssignmentResult {
     staffCode: string;
     paperId: number;
     period: string;
+    type: 'invigilator' | 'standby' | 'tech';
+    dutyDate: string;
+    dutyType: string;
   }[];
   unfilledSlots: {
     slotId: number;
     paperId: number;
     period: string;
+    type: 'invigilator' | 'standby' | 'tech';
     reasons: string[];
   }[];
   summary: {
@@ -235,14 +239,13 @@ export class SchedulerService {
     date: string,
     sessionType: 'Morning' | 'Afternoon'
   ): Promise<SessionAssignmentResult> {
-    // 1. Fetch unfilled invigilation slots for this session
+    // 1. Fetch ALL unfilled slots for this session (invigilators + standby)
     const { data: slots, error: slotsError } = await (supabase
       .from('exam_duties') as any)
       .select('*')
       .eq('duty_date', date)
       .eq('session_type', sessionType)
       .eq('is_slot', true)
-      .eq('slot_type', 'invigilator')
       .is('staff_code', null);
 
     if (slotsError) throw slotsError;
@@ -262,10 +265,17 @@ export class SchedulerService {
     // To track assignments made *within* this generation pass
     const teachersAssignedInSession = new Map<string, string[]>(); // staff_code -> periods[]
 
-    // 2. Process slots
-    // For now, we process them in the order they were returned
-    for (const slot of (slots as any[])) {
+    // 2. Sort slots by priority: Invigilators first, then Stand-By
+    // This ensures we fill the rooms first, then assign standbys from the remaining pool
+    const sortedSlots = [...(slots as any[])].sort((a, b) => {
+      if (a.slot_type === 'invigilator' && b.slot_type === 'standby') return -1;
+      if (a.slot_type === 'standby' && b.slot_type === 'invigilator') return 1;
+      return 0;
+    });
+
+    for (const slot of sortedSlots) {
       const period = slot.period_code || '';
+      const slotType = slot.slot_type as 'invigilator' | 'standby' | 'tech';
       
       // Fetch paper and session info to get the grade
       const { data: paper } = await supabase
@@ -286,6 +296,7 @@ export class SchedulerService {
           slotId: slot.id,
           paperId: slot.exam_paper_id || 0,
           period,
+          type: slotType,
           reasons: ['Paper or Session Grade info not found']
         });
         continue;
@@ -300,7 +311,6 @@ export class SchedulerService {
       });
 
       // Filter for those who are available AND haven't been assigned yet in this pass for THIS period
-      // Also check "Scattered" role consecutive period if we assigned them previously in this pass
       const candidates = availabilityResults.filter(avail => {
         if (!avail.isAvailable) return false;
 
@@ -322,7 +332,7 @@ export class SchedulerService {
         return true;
       });
 
-      // Sort candidates by load_percentage (favor lighter loads first as a baseline)
+      // Sort candidates by load_percentage (favor lighter loads first)
       candidates.sort((a, b) => (a.staff.load_percentage || 0) - (b.staff.load_percentage || 0));
 
       if (candidates.length > 0) {
@@ -331,19 +341,22 @@ export class SchedulerService {
           slotId: slot.id,
           staffCode: selected.staff_code,
           paperId: paper.id,
-          period
+          period,
+          type: slotType,
+          dutyDate: slot.duty_date,
+          dutyType: slot.duty_type
         });
 
         // Update internal tracking
         const currentAssigned = teachersAssignedInSession.get(selected.staff_code) || [];
         teachersAssignedInSession.set(selected.staff_code, [...currentAssigned, period]);
       } else {
-        // Collect reasons from the engine for why NO ONE was available
         const reasons = [...new Set(availabilityResults.flatMap(a => a.conflicts.map(c => c.message)))];
         unfilledSlots.push({
           slotId: slot.id,
           paperId: paper.id,
           period,
+          type: slotType,
           reasons: reasons.length > 0 ? reasons : ['No eligible staff found after session-wide conflict check']
         });
       }
@@ -360,6 +373,26 @@ export class SchedulerService {
         unfilled: unfilledSlots.length
       }
     };
+  }
+
+  /**
+   * Persists the generated assignments to the database
+   */
+  static async commitSessionAssignments(result: SessionAssignmentResult) {
+    if (result.assignments.length === 0) return { success: true, count: 0 };
+
+    const { error } = await supabase.from('exam_duties').upsert(
+      result.assignments.map(a => ({
+        id: a.slotId,
+        staff_code: a.staffCode,
+        duty_date: a.dutyDate,
+        duty_type: a.dutyType,
+        notes: `AUTO-ASSIGNED PHASE 3 (${new Date().toISOString().split('T')[0]})`
+      }))
+    );
+
+    if (error) throw error;
+    return { success: true, count: result.assignments.length };
   }
 
   /**

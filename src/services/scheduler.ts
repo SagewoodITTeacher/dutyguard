@@ -84,7 +84,11 @@ export interface OptimiseSessionResult {
   rebalancing: {
     proposals: RebalancingProposal[];
     applied?: ApplyProposalsResult;
+    iterations: number;
+    finalInvigVariance?: number;
+    finalStandbyVariance?: number;
   };
+  progress: string[];
   summary: {
     totalSlots: number;
     filled: number;
@@ -101,6 +105,8 @@ export interface OptimiseFullDayResult {
     filled: number;
     unfilled: number;
     techAssigned: number;
+    finalInvigVariance?: number;
+    finalStandbyVariance?: number;
   };
 }
 
@@ -113,6 +119,8 @@ export interface OptimiseDateRangeResult {
     filled: number;
     unfilled: number;
     techAssigned: number;
+    finalInvigVariance?: number;
+    finalStandbyVariance?: number;
   };
 }
 
@@ -131,6 +139,7 @@ export interface OptimisationOptions {
   endDate?: string;
   sessionType?: 'Morning' | 'Afternoon' | 'FullDay' | 'DateRange';
   autoApplyRebalancing?: boolean;
+  balanceThreshold?: number; // Default 70 mins
 }
 
 export type OptimisationResponse = 
@@ -147,21 +156,21 @@ export class SchedulerService {
    * @returns Detailed results of the optimisation pass
    */
   static async runOptimisation(options: OptimisationOptions): Promise<OptimisationResponse> {
-    const { startDate, endDate, sessionType = 'FullDay', autoApplyRebalancing = false } = options;
+    const { startDate, endDate, sessionType = 'FullDay', autoApplyRebalancing = false, balanceThreshold = 70 } = options;
 
     if (sessionType === 'DateRange') {
       if (!endDate) throw new Error('endDate is required for DateRange optimisation');
-      const result = await this.optimiseDateRange(startDate, endDate, { autoApplyRebalancing });
+      const result = await this.optimiseDateRange(startDate, endDate, { autoApplyRebalancing, balanceThreshold });
       return { type: 'dateRange', result };
     }
 
     if (sessionType === 'FullDay') {
-      const result = await this.optimiseFullDay(startDate, { autoApplyRebalancing });
+      const result = await this.optimiseFullDay(startDate, { autoApplyRebalancing, balanceThreshold });
       return { type: 'fullDay', result };
     }
 
     if (sessionType === 'Morning' || sessionType === 'Afternoon') {
-      const result = await this.optimiseSession(startDate, sessionType, { autoApplyRebalancing });
+      const result = await this.optimiseSession(startDate, sessionType, { autoApplyRebalancing, balanceThreshold });
       return { type: 'session', result };
     }
 
@@ -206,11 +215,12 @@ export class SchedulerService {
   }
 
   /**
-   * Phase 11: Get optimisation status for a date or session.
+   * Phase 11 & 13a: Get comprehensive optimisation status for a specific date.
    * Useful for showing status badges (e.g., "75% Filled") in the UI.
    * 
-   * @param date Date to check
-   * @param sessionType Optional session filter
+   * @param date Date string (YYYY-MM-DD)
+   * @param sessionType Optional session filter ('Morning' | 'Afternoon')
+   * @returns Object with counts, completion percentage, and status label
    */
   static async getOptimisationStatus(date: string, sessionType?: 'Morning' | 'Afternoon') {
     let query = (supabase
@@ -243,8 +253,79 @@ export class SchedulerService {
   }
 
   /**
+   * Phase 11 & 13a: Check status for a range of dates.
+   * Efficiently aggregates optimisation state for multiple days.
+   * 
+   * @param startDate Range start (YYYY-MM-DD)
+   * @param endDate Range end (YYYY-MM-DD)
+   * @returns List of daily status objects
+   */
+  static async getOptimisationStatusRange(startDate: string, endDate: string) {
+    const { data: assignments, error } = await (supabase
+      .from('exam_duties') as any)
+      .select('duty_date, session_type, staff_code, is_slot')
+      .gte('duty_date', startDate)
+      .lte('duty_date', endDate)
+      .eq('is_slot', true);
+
+    if (error) throw error;
+
+    const statsMap = new Map<string, { total: number, filled: number }>();
+
+    assignments?.forEach((a: any) => {
+      const dayKey = a.duty_date;
+      const current = statsMap.get(dayKey) || { total: 0, filled: 0 };
+      current.total += 1;
+      if (a.staff_code) current.filled += 1;
+      statsMap.set(dayKey, current);
+    });
+
+    return Array.from(statsMap.entries()).map(([date, stats]) => ({
+      date,
+      ...stats,
+      percentComplete: stats.total > 0 ? Math.round((stats.filled / stats.total) * 100) : 0,
+      status: stats.filled === stats.total ? 'complete' : (stats.filled > 0 ? 'partial' : 'empty')
+    }));
+  }
+
+  /**
+   * Phase 13a: Fetches rebalancing proposals for a session WITHOUT running the full optimisation.
+   * Useful for manual "Check for Improvements" UI flow.
+   * 
+   * @param date Date string
+   * @param sessionType 'Morning' or 'Afternoon'
+   */
+  static async getCurrentRebalancingProposals(date: string, sessionType: 'Morning' | 'Afternoon') {
+    const invigProposals = await this.proposeRebalancingSuggestions(date, sessionType, 'Invigilation');
+    const standbyProposals = await this.proposeRebalancingSuggestions(date, sessionType, 'Stand-By');
+    return [...invigProposals, ...standbyProposals];
+  }
+
+  /**
+   * Phase 13a: Returns formatted data for workload distribution charts.
+   * Helpful for visualising "who is doing the most work".
+   */
+  static async getWorkloadChartData(startDate?: string, endDate?: string) {
+    const workloads = await this.getTeacherWorkloadSummary(startDate, endDate);
+    // Sort by total minutes descending
+    return workloads
+      .map(w => ({
+        name: w.fullName,
+        code: w.staffCode,
+        total: w.invigilationMinutes + w.standbyMinutes + w.techMinutes,
+        invigilation: w.invigilationMinutes,
+        standby: w.standbyMinutes,
+        tech: w.techMinutes
+      }))
+      .sort((a, b) => b.total - a.total);
+  }
+
+  /**
    * Phase 11: Fetch current duty assignments grouped by teacher.
    * Efficient for building individual workload and "My Schedule" views.
+   * 
+   * @param startDate Range start
+   * @param endDate Range end
    */
   static async getAssignmentsByStaff(startDate: string, endDate: string) {
     const { data: duties, error } = await supabase
@@ -410,35 +491,104 @@ export class SchedulerService {
   }
 
   /**
-   * Phase 7: Session Orchestrator
+   * Phase 7 & 12: Session Orchestrator
    * 
    * Runs the complete scheduling flow for a single session in one call.
-   * Sequence: Tech Duties -> Initial Packing -> (Optional) Rebalancing.
+   * Sequence: Tech Duties -> Initial Packing -> Iterative Rebalancing.
+   * 
+   * @param date Date string (YYYY-MM-DD)
+   * @param sessionType 'Morning' or 'Afternoon'
+   * @param options Configuration including auto-apply and balance thresholds
    */
   static async optimiseSession(
     date: string,
     sessionType: 'Morning' | 'Afternoon',
-    options: { autoApplyRebalancing?: boolean } = { autoApplyRebalancing: false }
+    options: { autoApplyRebalancing?: boolean; balanceThreshold?: number } = { autoApplyRebalancing: false, balanceThreshold: 70 }
   ): Promise<OptimiseSessionResult> {
+    const progress: string[] = [];
+    const balanceThreshold = options.balanceThreshold || 70;
+
     // 1. Assign TECH duties first (they have highest priority and block the full day)
+    progress.push('Stage 1: Assigning priority TECH duties...');
     const techResult = await this.assignTechDutyForSession(date, sessionType);
     if (techResult.assignments.length > 0) {
       await this.commitSessionAssignments(techResult);
+      progress.push(`Assigned ${techResult.assignments.length} TECH slots.`);
     }
 
     // 2. Assign regular invigilators and stand-bys
+    progress.push('Stage 2: Performing initial slot packing (packing low-load staff)...');
     const initialResult = await this.generateInitialAssignmentsForSession(date, sessionType);
     if (initialResult.assignments.length > 0) {
       await this.commitSessionAssignments(initialResult);
+      progress.push(`Initially filled ${initialResult.assignments.length} slots.`);
     }
 
-    // 3. Propose rebalancing based on newly generated loads
-    const proposals = await this.proposeRebalancingSuggestions(date, sessionType);
-    
-    let rebalancingApplied: ApplyProposalsResult | undefined;
-    if (options.autoApplyRebalancing && proposals.length > 0) {
-      rebalancingApplied = await this.applyApprovedProposals(proposals);
+    // 3. Iterative Rebalancing
+    progress.push('Stage 3: Commencing iterative rebalancing for workload equalization...');
+    let iterations = 0;
+    const allProposals: RebalancingProposal[] = [];
+    let lastAppliedResult: ApplyProposalsResult | undefined;
+
+    while (iterations < 10) {
+      const statsBefore = await this.getLoadImbalanceReport();
+      const currentVariance = statsBefore.invigilation.range;
+
+      if (currentVariance <= balanceThreshold) {
+        progress.push(`Rebalancing target achieved (Current Variance: ${currentVariance}m <= Threshold: ${balanceThreshold}m).`);
+        break;
+      }
+
+      const proposals = await this.proposeRebalancingSuggestions(date, sessionType, 'Invigilation');
+      
+      if (proposals.length === 0) {
+        // Try Stand-By rebalancing if Invigilation is stuck but Stand-By might need work
+        const standbyProposals = await this.proposeRebalancingSuggestions(date, sessionType, 'Stand-By');
+        if (standbyProposals.length > 0) {
+          proposals.push(...standbyProposals);
+        }
+      }
+
+      if (proposals.length === 0) {
+        progress.push('No further safe rebalancing improvements could be identified.');
+        break;
+      }
+
+      allProposals.push(...proposals);
+      
+      if (options.autoApplyRebalancing) {
+        const applied = await this.applyApprovedProposals(proposals);
+        
+        // Merge applied summaries if needed, but for simplicity we'll just track the last one or total
+        if (!lastAppliedResult) {
+          lastAppliedResult = applied;
+        } else {
+          lastAppliedResult = {
+            applied: [...lastAppliedResult.applied, ...applied.applied],
+            rejected: [...lastAppliedResult.rejected, ...applied.rejected],
+            summary: {
+              totalProposals: lastAppliedResult.summary.totalProposals + applied.summary.totalProposals,
+              appliedCount: lastAppliedResult.summary.appliedCount + applied.summary.appliedCount,
+              rejectedCount: lastAppliedResult.summary.rejectedCount + applied.summary.rejectedCount
+            }
+          };
+        }
+
+        if (applied.summary.appliedCount === 0) {
+          progress.push(`Iteration ${iterations + 1}: Proposals rejected by conflict engine. Ending loop.`);
+          break;
+        }
+        progress.push(`Iteration ${iterations + 1}: Applied ${applied.summary.appliedCount} improvements. New Variance: ${currentVariance - proposals[0].loadDifference}m (est).`);
+      } else {
+        progress.push(`Iteration ${iterations + 1}: ${proposals.length} improvements proposed (Manual review required).`);
+        break; 
+      }
+
+      iterations++;
     }
+
+    progress.push('Stage 4: Finalizing session assignments and reporting stats.');
+    const finalStats = await this.getLoadImbalanceReport();
 
     const totalSlots = techResult.summary.totalSlots + initialResult.summary.totalSlots;
     const filled = techResult.summary.filled + initialResult.summary.filled;
@@ -450,9 +600,13 @@ export class SchedulerService {
       tech: techResult,
       initial: initialResult,
       rebalancing: {
-        proposals,
-        applied: rebalancingApplied
+        proposals: allProposals,
+        applied: lastAppliedResult,
+        iterations,
+        finalInvigVariance: finalStats.invigilation.range,
+        finalStandbyVariance: finalStats.standby.range
       },
+      progress,
       summary: {
         totalSlots,
         filled,
@@ -469,7 +623,7 @@ export class SchedulerService {
    */
   static async optimiseFullDay(
     date: string,
-    options: { autoApplyRebalancing?: boolean } = { autoApplyRebalancing: false }
+    options: { autoApplyRebalancing?: boolean; balanceThreshold?: number } = { autoApplyRebalancing: false, balanceThreshold: 70 }
   ): Promise<OptimiseFullDayResult> {
     // 1. Optimise Morning Session
     // We commit Morning before Afternoon starts so Afternoon can see Morning assignments
@@ -484,6 +638,8 @@ export class SchedulerService {
     const unfilled = morning.summary.unfilled + afternoon.summary.unfilled;
     const techAssigned = morning.tech.summary.filled + afternoon.tech.summary.filled;
 
+    const finalStats = await this.getLoadImbalanceReport();
+
     return {
       date,
       morning,
@@ -492,7 +648,9 @@ export class SchedulerService {
         totalSlots,
         filled,
         unfilled,
-        techAssigned
+        techAssigned,
+        finalInvigVariance: finalStats.invigilation.range,
+        finalStandbyVariance: finalStats.standby.range
       }
     };
   }
@@ -506,7 +664,7 @@ export class SchedulerService {
   static async optimiseDateRange(
     startDate: string,
     endDate: string,
-    options: { autoApplyRebalancing?: boolean } = { autoApplyRebalancing: false }
+    options: { autoApplyRebalancing?: boolean; balanceThreshold?: number } = { autoApplyRebalancing: false, balanceThreshold: 70 }
   ): Promise<OptimiseDateRangeResult> {
     const days: OptimiseFullDayResult[] = [];
     const start = new Date(startDate);
@@ -528,6 +686,8 @@ export class SchedulerService {
     const unfilled = days.reduce((sum, d) => sum + d.summary.unfilled, 0);
     const techAssigned = days.reduce((sum, d) => sum + d.summary.techAssigned, 0);
 
+    const finalStats = await this.getLoadImbalanceReport();
+
     return {
       startDate,
       endDate,
@@ -536,30 +696,38 @@ export class SchedulerService {
         totalSlots,
         filled,
         unfilled,
-        techAssigned
+        techAssigned,
+        finalInvigVariance: finalStats.invigilation.range,
+        finalStandbyVariance: finalStats.standby.range
       }
     };
   }
   /**
-   * Phase 5b: Propose rebalancing suggestions for a session.
+   * Phase 5b & 12: Propose rebalancing suggestions for a session.
    * 
    * Identifies over-burdened teachers and suggests available low-load replacements.
    * Does NOT write to the database. Returns proposals for UI review.
    * 
    * @param date The date to analyze
    * @param sessionType Morning or Afternoon
+   * @param targetType The duty type to balance ('Invigilation' or 'Stand-By')
    */
   static async proposeRebalancingSuggestions(
     date: string,
-    sessionType: 'Morning' | 'Afternoon'
+    sessionType: 'Morning' | 'Afternoon',
+    targetType: 'Invigilation' | 'Stand-By' = 'Invigilation'
   ): Promise<RebalancingProposal[]> {
     // 1. Get current workloads and stats
     const workloads = await this.getTeacherWorkloadSummary();
     const stats = await this.getLoadImbalanceReport();
     
+    const statsKey = targetType === 'Invigilation' ? 'invigilation' : 'standby';
+    const loadKey = targetType === 'Invigilation' ? 'invigilationMinutes' : 'standbyMinutes';
+
     // Thresholds for "overburdened" and "available for pick-up"
-    const highThreshold = stats.invigilation.avg + (stats.invigilation.stdDev * 0.5);
-    const lowThreshold = stats.invigilation.avg - (stats.invigilation.stdDev * 0.5);
+    // Using a more dynamic threshold based on standard deviation
+    const highThreshold = stats[statsKey].avg + (stats[statsKey].stdDev * 0.3);
+    const lowThreshold = stats[statsKey].avg - (stats[statsKey].stdDev * 0.3);
 
     // 2. Fetch assigned duties for this session
     const { data: currentDuties, error } = await supabase
@@ -573,6 +741,7 @@ export class SchedulerService {
       `)
       .eq('duty_date', date)
       .eq('session_type', sessionType)
+      .eq('duty_type', targetType)
       .not('staff_code', 'is', null);
 
     if (error) throw error;
@@ -582,13 +751,10 @@ export class SchedulerService {
 
     // 3. Analyze each duty
     for (const duty of currentDuties) {
-      if (duty.duty_type === 'Tech-Duty') continue; // Skip Tech-Duty as per Phase 5a rules
-
       const currentWorkload = workloads.find(w => w.staffCode === duty.staff_code);
-      if (!currentWorkload || currentWorkload.invigilationMinutes <= highThreshold) continue;
+      if (!currentWorkload || (currentWorkload[loadKey] as number) <= highThreshold) continue;
 
       // This teacher is overburdened. Try to find a replacement.
-      // Fetch paper details for availability check
       const { data: paper } = await supabase
         .from('exam_papers')
         .select(`
@@ -609,16 +775,17 @@ export class SchedulerService {
         slotType: duty.duty_type === 'Stand-By' ? 'standby' : 'invigilator'
       });
 
-      // Filter for available teachers with low load
+      // Filter for available teachers with low load in this specific target category
       const candidates = availability
         .filter(a => {
           if (!a.isAvailable) return false;
           const w = workloads.find(wl => wl.staffCode === a.staff.staff_code);
-          return w && w.invigilationMinutes < lowThreshold;
+          // Important: Must be below threshold for the target load category
+          return w && (w[loadKey] as number) < lowThreshold;
         })
         .sort((a, b) => {
-          const wA = workloads.find(wl => wl.staffCode === a.staff.staff_code)?.invigilationMinutes || 0;
-          const wB = workloads.find(wl => wl.staffCode === b.staff.staff_code)?.invigilationMinutes || 0;
+          const wA = (workloads.find(wl => wl.staffCode === a.staff.staff_code) as any)[loadKey] || 0;
+          const wB = (workloads.find(wl => wl.staffCode === b.staff.staff_code) as any)[loadKey] || 0;
           return wA - wB;
         });
 
@@ -630,9 +797,12 @@ export class SchedulerService {
           slotId: duty.id,
           currentStaffCode: duty.staff_code!,
           suggestedStaffCode: bestCandidate.staff_code,
-          reason: `Workload Reduction: ${currentWorkload.fullName} (${currentWorkload.invigilationMinutes}m) -> ${bestCandidate.first_name} ${bestCandidate.last_name} (${candidateWorkload.invigilationMinutes}m)`,
-          loadDifference: currentWorkload.invigilationMinutes - candidateWorkload.invigilationMinutes
+          reason: `Workload Reduction (${targetType}): ${currentWorkload.fullName} (${currentWorkload[loadKey]}m) -> ${bestCandidate.first_name} ${bestCandidate.last_name} (${candidateWorkload[loadKey]}m)`,
+          loadDifference: (currentWorkload[loadKey] as number) - (candidateWorkload[loadKey] as number)
         });
+
+        // Optimization: Don't suggest more than one swap per slot in one call
+        // But we could suggest multiple slots per call as long as they are distinct.
       }
     }
 
@@ -643,9 +813,11 @@ export class SchedulerService {
    * Phase 5a: Get comprehensive workload summary for all teachers.
    * 
    * Calculates total minutes for invigilation, standby, and tech duties.
+   * Aggregates from all assignments within the given date range.
    * 
    * @param startDate Optional start date for the range
    * @param endDate Optional end date for the range
+   * @returns Array of workload objects including minutes and session counts
    */
   static async getTeacherWorkloadSummary(startDate?: string, endDate?: string): Promise<TeacherWorkload[]> {
     let query = supabase
@@ -709,7 +881,14 @@ export class SchedulerService {
   }
 
   /**
-   * Phase 5a: Calculate load imbalance statistics
+   * Phase 5a & 13a: Calculate load imbalance statistics for teachers.
+   * 
+   * Computes average, standard deviation, and range for invigilation and standby loads.
+   * Used by the UI to evaluate the "health" and "fairness" of the current schedule.
+   * 
+   * @param startDate Optional range start
+   * @param endDate Optional range end
+   * @returns Imbalance report with detailed metrics for invigilation and standby categories
    */
   static async getLoadImbalanceReport(startDate?: string, endDate?: string): Promise<LoadImbalanceReport> {
     const workloads = await this.getTeacherWorkloadSummary(startDate, endDate);
@@ -767,6 +946,7 @@ export class SchedulerService {
    * 
    * Answers the critical question: "Who is available for this slot and why/why not?"
    * Checks leaves, teaching timetables, break duties, and existing exam duties.
+   * Also respects TECH duty blocks and Scattered role restrictions.
    * 
    * @param params Slot details including date, period, grade, and type.
    */
@@ -942,6 +1122,27 @@ export class SchedulerService {
         conflicts
       };
     });
+  }
+
+  /**
+   * Phase 13a: Get a summary of how many duties are assigned vs unassigned for a given range.
+   * Perfect for overall progress dashboards.
+   */
+  static async getGlobalOptimisationSummary(startDate: string, endDate: string) {
+    const dailyStats = await this.getOptimisationStatusRange(startDate, endDate);
+    const totalFilled = dailyStats.reduce((sum, d) => sum + d.filled, 0);
+    const totalSlots = dailyStats.reduce((sum, d) => sum + d.total, 0);
+    const avgCompletion = dailyStats.length > 0 
+      ? Math.round(dailyStats.reduce((sum, d) => sum + d.percentComplete, 0) / dailyStats.length)
+      : 0;
+
+    return {
+      totalFilled,
+      totalSlots,
+      avgCompletion,
+      dayCount: dailyStats.length,
+      days: dailyStats
+    };
   }
 
   /**

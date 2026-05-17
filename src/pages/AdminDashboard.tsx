@@ -23,6 +23,8 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { Link } from 'react-router-dom';
+import { SchedulerService } from '../services/scheduler';
+import { ProgressPopup } from '../components/ProgressPopup';
 
 // Period config for Zulu operational time
 const PERIOD_CONFIG: Record<string, { start: string, end: string }> = {
@@ -60,6 +62,8 @@ export function AdminDashboard() {
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedPeriod, setSelectedPeriod] = useState('P2'); // Default to P2 as per high-fidelity version
   const [isGenerating, setIsGenerating] = useState(false);
+  const [progressMessages, setProgressMessages] = useState<string[]>([]);
+  const [isOptimisationComplete, setIsOptimisationComplete] = useState(false);
   const [showOpsModal, setShowOpsModal] = useState(false);
   const [showSchedulerModal, setShowSchedulerModal] = useState(false);
   const [showConflictsModal, setShowConflictsModal] = useState(false);
@@ -336,11 +340,70 @@ export function AdminDashboard() {
 
   const handleRunGenerator = async () => {
     setIsGenerating(true);
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    (window as any).toast?.('Optimization Engine Matrix Complete', 'success');
-    setIsGenerating(false);
-    setShowSchedulerModal(false);
-    fetchAdminData();
+    setIsOptimisationComplete(false);
+    setProgressMessages(['Initializing Optimization Engine...']);
+
+    try {
+      const isDateRange = scheduleOptions.startDate !== scheduleOptions.endDate;
+      
+      const response = await SchedulerService.runOptimisation({
+        startDate: scheduleOptions.startDate,
+        endDate: scheduleOptions.endDate,
+        sessionType: isDateRange ? 'DateRange' : 'FullDay',
+        autoApplyRebalancing: true,
+        balanceThreshold: 70,
+        onProgress: (message) => {
+          console.log('[Scheduler Progress]:', message);
+          setProgressMessages(prev => [...prev, message]);
+        }
+      });
+
+      console.log('Optimisation Response:', response);
+      setProgressMessages(prev => [...prev, 'Deployment Matrix Optimized Successfully.']);
+      setIsOptimisationComplete(true);
+      (window as any).toast?.('Optimization Engine Matrix Complete', 'success');
+      
+      fetchAdminData();
+    } catch (err: any) {
+      console.error('Optimisation failed:', err);
+      setProgressMessages(prev => [...prev, `ERROR: ${err.message || 'Unknown error occurred'}`]);
+      (window as any).toast?.(`Optimization Failed: ${err.message}`, 'error');
+    }
+  };
+
+  const setPredefinedRange = (type: 'Single' | 'Week' | 'Period') => {
+    const today = new Date();
+    const start = new Date(selectedDate);
+    
+    if (type === 'Single') {
+      setScheduleOptions({
+        ...scheduleOptions,
+        startDate: selectedDate,
+        endDate: selectedDate
+      });
+    } else if (type === 'Week') {
+      // Find Monday of the week of 'start'
+      const day = start.getDay();
+      const diff = start.getDate() - day + (day === 0 ? -6 : 1);
+      const monday = new Date(start.setDate(diff));
+      const friday = new Date(monday);
+      friday.setDate(monday.getDate() + 4);
+      
+      setScheduleOptions({
+        ...scheduleOptions,
+        startDate: monday.toISOString().split('T')[0],
+        endDate: friday.toISOString().split('T')[0]
+      });
+    } else if (type === 'Period') {
+      // Full Exam Period (Example: today to 3 weeks later)
+      const endDate = new Date(start);
+      endDate.setDate(start.getDate() + 21);
+      setScheduleOptions({
+        ...scheduleOptions,
+        startDate: selectedDate,
+        endDate: endDate.toISOString().split('T')[0]
+      });
+    }
   };
 
   const calculateEndTime = (startTime: string, durationMinutes: number) => {
@@ -769,6 +832,26 @@ export function AdminDashboard() {
 
 
       <AnimatePresence>
+        {isGenerating && (
+          <ProgressPopup
+             isOpen={isGenerating}
+             title="Optimization Engine"
+             progress={progressMessages}
+             isCompleted={isOptimisationComplete}
+             onClose={() => {
+               setIsGenerating(false);
+               setShowSchedulerModal(false);
+             }}
+             onCancel={() => {
+               // In a real app we might want to signal cancellation to the service
+               setIsGenerating(false);
+               setShowSchedulerModal(false);
+             }}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {showOpsModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-xl">
              <motion.div initial={{ scale: 0.9, opacity: 0, y: 50 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 50 }} className="relative w-full max-w-xl bg-white rounded-[4rem] overflow-hidden shadow-2xl">
@@ -939,24 +1022,51 @@ export function AdminDashboard() {
                     <X className="h-8 w-8 text-white" />
                  </button>
               </div>
-              <div className="p-12 space-y-10">
+              <div className="p-12 space-y-10 border-b border-slate-100">
+                 <div className="space-y-4">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-2">Tactical Presets</label>
+                    <div className="grid grid-cols-3 gap-3">
+                       <button 
+                         onClick={() => setPredefinedRange('Single')}
+                         className={cn(
+                           "py-3 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all",
+                           scheduleOptions.startDate === scheduleOptions.endDate ? "bg-indigo-600 text-white border-indigo-700 shadow-lg" : "bg-white text-slate-600 border-slate-100 hover:border-indigo-100"
+                         )}
+                       >
+                         Single Day
+                       </button>
+                       <button 
+                         onClick={() => setPredefinedRange('Week')}
+                         className="py-3 bg-white text-slate-600 border border-slate-100 rounded-xl text-[10px] font-black uppercase tracking-widest hover:border-indigo-100 transition-all"
+                       >
+                         This Week
+                       </button>
+                       <button 
+                         onClick={() => setPredefinedRange('Period')}
+                         className="py-3 bg-white text-slate-600 border border-slate-100 rounded-xl text-[10px] font-black uppercase tracking-widest hover:border-indigo-100 transition-all"
+                       >
+                         Full Period
+                       </button>
+                    </div>
+                 </div>
+
                  <div className="grid grid-cols-2 gap-8">
                     <div className="space-y-4">
                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-2">Start Optimization</label>
-                       <input type="date" value={scheduleOptions.startDate} onChange={e => setScheduleOptions({...scheduleOptions, startDate: e.target.value})} className="w-full h-16 px-8 bg-slate-50 border border-slate-100 rounded-[2rem] outline-none font-bold" />
+                       <input type="date" value={scheduleOptions.startDate} onChange={e => setScheduleOptions({...scheduleOptions, startDate: e.target.value})} className="w-full h-16 px-8 bg-slate-50 border border-slate-100 rounded-[2rem] outline-none font-bold text-xs" />
                     </div>
                     <div className="space-y-4">
                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-2">End Optimization</label>
-                       <input type="date" value={scheduleOptions.endDate} onChange={e => setScheduleOptions({...scheduleOptions, endDate: e.target.value})} className="w-full h-16 px-8 bg-slate-50 border border-slate-100 rounded-[2rem] outline-none font-bold" />
+                       <input type="date" value={scheduleOptions.endDate} onChange={e => setScheduleOptions({...scheduleOptions, endDate: e.target.value})} className="w-full h-16 px-8 bg-slate-50 border border-slate-100 rounded-[2rem] outline-none font-bold text-xs" />
                     </div>
                  </div>
-                 <div className="pt-8 border-t border-slate-100 flex gap-4">
-                    <button onClick={() => setShowSchedulerModal(false)} className="flex-1 py-6 bg-slate-50 text-slate-400 rounded-[2rem] font-black uppercase text-[11px] tracking-widest border border-slate-100">Abort Execution</button>
-                    <button onClick={handleRunGenerator} disabled={isGenerating} className="flex-[2] py-6 bg-slate-950 text-white rounded-[2rem] font-black uppercase text-[11px] tracking-[0.2em] hover:bg-indigo-600 transition-all flex items-center justify-center gap-3 shadow-2xl shadow-indigo-950/20">
-                       {isGenerating ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />}
-                       Initialize Generation
-                    </button>
-                 </div>
+              </div>
+              <div className="p-12 pt-8 flex gap-4">
+                 <button onClick={() => setShowSchedulerModal(false)} className="flex-1 py-6 bg-slate-50 text-slate-400 rounded-[2rem] font-black uppercase text-[11px] tracking-widest border border-slate-100 hover:bg-slate-100 transition-all">Abort Execution</button>
+                 <button onClick={handleRunGenerator} disabled={isGenerating} className="flex-[2] py-6 bg-slate-950 text-white rounded-[2rem] font-black uppercase text-[11px] tracking-[0.2em] hover:bg-indigo-600 transition-all flex items-center justify-center gap-3 shadow-2xl shadow-indigo-950/20">
+                    {isGenerating ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />}
+                    Initialize Generation
+                 </button>
               </div>
             </motion.div>
           </div>

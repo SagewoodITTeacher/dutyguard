@@ -140,6 +140,7 @@ export interface OptimisationOptions {
   sessionType?: 'Morning' | 'Afternoon' | 'FullDay' | 'DateRange';
   autoApplyRebalancing?: boolean;
   balanceThreshold?: number; // Default 70 mins
+  onProgress?: (message: string) => void;
 }
 
 export type OptimisationResponse = 
@@ -156,21 +157,21 @@ export class SchedulerService {
    * @returns Detailed results of the optimisation pass
    */
   static async runOptimisation(options: OptimisationOptions): Promise<OptimisationResponse> {
-    const { startDate, endDate, sessionType = 'FullDay', autoApplyRebalancing = false, balanceThreshold = 70 } = options;
+    const { startDate, endDate, sessionType = 'FullDay', autoApplyRebalancing = false, balanceThreshold = 70, onProgress } = options;
 
     if (sessionType === 'DateRange') {
       if (!endDate) throw new Error('endDate is required for DateRange optimisation');
-      const result = await this.optimiseDateRange(startDate, endDate, { autoApplyRebalancing, balanceThreshold });
+      const result = await this.optimiseDateRange(startDate, endDate, { autoApplyRebalancing, balanceThreshold, onProgress });
       return { type: 'dateRange', result };
     }
 
     if (sessionType === 'FullDay') {
-      const result = await this.optimiseFullDay(startDate, { autoApplyRebalancing, balanceThreshold });
+      const result = await this.optimiseFullDay(startDate, { autoApplyRebalancing, balanceThreshold, onProgress });
       return { type: 'fullDay', result };
     }
 
     if (sessionType === 'Morning' || sessionType === 'Afternoon') {
-      const result = await this.optimiseSession(startDate, sessionType, { autoApplyRebalancing, balanceThreshold });
+      const result = await this.optimiseSession(startDate, sessionType, { autoApplyRebalancing, balanceThreshold, onProgress });
       return { type: 'session', result };
     }
 
@@ -503,29 +504,34 @@ export class SchedulerService {
   static async optimiseSession(
     date: string,
     sessionType: 'Morning' | 'Afternoon',
-    options: { autoApplyRebalancing?: boolean; balanceThreshold?: number } = { autoApplyRebalancing: false, balanceThreshold: 70 }
+    options: { autoApplyRebalancing?: boolean; balanceThreshold?: number, onProgress?: (m: string) => void } = { autoApplyRebalancing: false, balanceThreshold: 70 }
   ): Promise<OptimiseSessionResult> {
     const progress: string[] = [];
     const balanceThreshold = options.balanceThreshold || 70;
 
+    const logProgress = (msg: string) => {
+      progress.push(msg);
+      if (options.onProgress) options.onProgress(msg);
+    };
+
     // 1. Assign TECH duties first (they have highest priority and block the full day)
-    progress.push('Stage 1: Assigning priority TECH duties...');
+    logProgress(`Stage 1: Assigning priority TECH duties analysis for ${date} ${sessionType}...`);
     const techResult = await this.assignTechDutyForSession(date, sessionType);
     if (techResult.assignments.length > 0) {
       await this.commitSessionAssignments(techResult);
-      progress.push(`Assigned ${techResult.assignments.length} TECH slots.`);
+      logProgress(`Assigned ${techResult.assignments.length} TECH slots.`);
     }
 
     // 2. Assign regular invigilators and stand-bys
-    progress.push('Stage 2: Performing initial slot packing (packing low-load staff)...');
+    logProgress('Stage 2: Performing initial slot packing (packing low-load staff)...');
     const initialResult = await this.generateInitialAssignmentsForSession(date, sessionType);
     if (initialResult.assignments.length > 0) {
       await this.commitSessionAssignments(initialResult);
-      progress.push(`Initially filled ${initialResult.assignments.length} slots.`);
+      logProgress(`Initially filled ${initialResult.assignments.length} slots.`);
     }
 
     // 3. Iterative Rebalancing
-    progress.push('Stage 3: Commencing iterative rebalancing for workload equalization...');
+    logProgress('Stage 3: Commencing iterative rebalancing for workload equalization...');
     let iterations = 0;
     const allProposals: RebalancingProposal[] = [];
     let lastAppliedResult: ApplyProposalsResult | undefined;
@@ -535,7 +541,7 @@ export class SchedulerService {
       const currentVariance = statsBefore.invigilation.range;
 
       if (currentVariance <= balanceThreshold) {
-        progress.push(`Rebalancing target achieved (Current Variance: ${currentVariance}m <= Threshold: ${balanceThreshold}m).`);
+        logProgress(`Rebalancing target achieved (Current Variance: ${currentVariance}m <= Threshold: ${balanceThreshold}m).`);
         break;
       }
 
@@ -550,7 +556,7 @@ export class SchedulerService {
       }
 
       if (proposals.length === 0) {
-        progress.push('No further safe rebalancing improvements could be identified.');
+        logProgress('No further safe rebalancing improvements could be identified.');
         break;
       }
 
@@ -575,19 +581,19 @@ export class SchedulerService {
         }
 
         if (applied.summary.appliedCount === 0) {
-          progress.push(`Iteration ${iterations + 1}: Proposals rejected by conflict engine. Ending loop.`);
+          logProgress(`Iteration ${iterations + 1}: Proposals rejected by conflict engine. Ending loop.`);
           break;
         }
-        progress.push(`Iteration ${iterations + 1}: Applied ${applied.summary.appliedCount} improvements. New Variance: ${currentVariance - proposals[0].loadDifference}m (est).`);
+        logProgress(`Iteration ${iterations + 1}: Applied ${applied.summary.appliedCount} improvements. New Variance: ${currentVariance - proposals[0].loadDifference}m (est).`);
       } else {
-        progress.push(`Iteration ${iterations + 1}: ${proposals.length} improvements proposed (Manual review required).`);
+        logProgress(`Iteration ${iterations + 1}: ${proposals.length} improvements proposed (Manual review required).`);
         break; 
       }
 
       iterations++;
     }
 
-    progress.push('Stage 4: Finalizing session assignments and reporting stats.');
+    logProgress('Stage 4: Finalizing session assignments and reporting stats.');
     const finalStats = await this.getLoadImbalanceReport();
 
     const totalSlots = techResult.summary.totalSlots + initialResult.summary.totalSlots;
@@ -623,8 +629,9 @@ export class SchedulerService {
    */
   static async optimiseFullDay(
     date: string,
-    options: { autoApplyRebalancing?: boolean; balanceThreshold?: number } = { autoApplyRebalancing: false, balanceThreshold: 70 }
+    options: { autoApplyRebalancing?: boolean; balanceThreshold?: number, onProgress?: (m: string) => void } = { autoApplyRebalancing: false, balanceThreshold: 70 }
   ): Promise<OptimiseFullDayResult> {
+    if (options.onProgress) options.onProgress(`Starting Full Day Optimisation for ${date}...`);
     // 1. Optimise Morning Session
     // We commit Morning before Afternoon starts so Afternoon can see Morning assignments
     const morning = await this.optimiseSession(date, 'Morning', options);
@@ -664,11 +671,13 @@ export class SchedulerService {
   static async optimiseDateRange(
     startDate: string,
     endDate: string,
-    options: { autoApplyRebalancing?: boolean; balanceThreshold?: number } = { autoApplyRebalancing: false, balanceThreshold: 70 }
+    options: { autoApplyRebalancing?: boolean; balanceThreshold?: number, onProgress?: (m: string) => void } = { autoApplyRebalancing: false, balanceThreshold: 70 }
   ): Promise<OptimiseDateRangeResult> {
     const days: OptimiseFullDayResult[] = [];
     const start = new Date(startDate);
     const end = new Date(endDate);
+
+    if (options.onProgress) options.onProgress(`Starting Multi-Day Range Optimisation (${startDate} to ${endDate})...`);
 
     // Sequence ensures load spreads naturally across the range
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
@@ -677,6 +686,7 @@ export class SchedulerService {
       
       if (isWeekend) continue;
 
+      if (options.onProgress) options.onProgress(`Processing Date: ${dateStr}...`);
       const dayResult = await this.optimiseFullDay(dateStr, options);
       days.push(dayResult);
     }
